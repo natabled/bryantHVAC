@@ -1,0 +1,41 @@
+# Bryant HVAC RS-485 capture — Phase 1: framing only
+# Parser, climate component, and writer intentionally omitted.
+esphome:
+  name: bryant-hvac
+  friendly_name: Bryant HVAC Framer
+  platformio_options:
+    board_build.flash_mode: dio
+
+esp32:
+  board: m5stack-atom
+  framework:
+    type: esp-idf
+
+logger:
+  level: DEBUG
+  baud_rate: 0
+
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [bryant_framer]
+
+uart:
+  id: hvac_uart
+  tx_pin: GPIO19
+  rx_pin: GPIO22
+  baud_rate: 38400
+  data_bits: 8
+  parity: NONE
+  stop_bits: 1
+  rx_buffer_size: 8192
+
+bryant_framer:
+  id: hvac_framer
+  uart_id: hvac_uart
+  drain_interval: 7ms
+  ring_buffer_size: 2048
+  max_payload_length: 200
+  log_valid_frames: true
+  log_frame_errors: true
