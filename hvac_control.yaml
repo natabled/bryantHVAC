@@ -2,6 +2,9 @@
 esphome:
   name: bryant-hvac
   friendly_name: Bryant HVAC
+  project: 
+    name: 'chatgpt.bryant-hvac'
+    version: '3.1'
   platformio_options:
     board_build.flash_mode: dio
 
@@ -205,9 +208,9 @@ climate:
     optimistic: false
     restore_mode: NO_RESTORE
     visual:
-      min_temperature: 50
-      max_temperature: 90
-      temperature_step: 1
+      min_temperature: 10 # 50F
+      max_temperature: 30 # 86F
+      temperature_step: 0.555 # 1F
     on_control:
       - logger.log: "Bryant climate is monitor-only; control ignored"
     initial_state:
