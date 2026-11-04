@@ -53,8 +53,10 @@ void BryantFramer::drain_uart_() {
     push_(byte);
     ++drained;
   }
-  if (drained && log_frame_errors_) ESP_LOGV(TAG, "UART drain: %u byte(s), ring occupancy=%u",
-      static_cast<unsigned>(drained), static_cast<unsigned>(count_));
+  if (drained && log_frame_errors_) {
+    ESP_LOGV(TAG, "UART drain: %u byte(s), ring occupancy=%u",
+             static_cast<unsigned>(drained), static_cast<unsigned>(count_));
+  }
 }
 
 bool BryantFramer::header_at_(size_t offset) const {
@@ -131,7 +133,9 @@ void BryantFramer::process_frames_() {
     const uint32_t rcv_ms = millis();
     if (log_valid_frames_) log_frame_(frame.data(), frame_size, fid, rcv_ms);
     if (listener_ != nullptr) {
-      const FrameView view{fid, rcv_ms, frame[0], frame[2], frame[7], frame[4], frame.data() + HEADER_SIZE};
+      const FrameView view{fid, rcv_ms, frame[0], frame[1], frame[2], frame[3],
+                           frame[4], frame[5], frame[6], frame[7],
+                           frame.data() + HEADER_SIZE, frame_size};
       listener_->on_frame(view);  // synchronous; frame storage is valid until return
     }
     pop_(frame_size);  // consume the full frame; following frame remains queued

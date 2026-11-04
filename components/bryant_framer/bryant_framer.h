@@ -1,23 +1,13 @@
 #pragma once
 
-#include "esphome.h"
+#include "esphome/core/component.h"
+#include "esphome/components/bryant_framer/bryant_frame.h"
 #include "esphome/components/uart/uart.h"
 #include <array>
 #include <cstddef>
 #include <cstdint>
 
 namespace bryant_framer {
-
-struct FrameView {
-  uint32_t id, received_ms;
-  uint8_t dst, src, function, length;
-  const uint8_t *payload;  // raw frame bytes [8..8+length); excludes CRC
-};
-class FrameListener {
- public:
-  virtual ~FrameListener() = default;
-  virtual void on_frame(const FrameView &frame) = 0;
-};
 
 class BryantFramer : public esphome::Component, public esphome::uart::UARTDevice {
  public:

@@ -1,8 +1,8 @@
 #pragma once
-#include "esphome.h"
+#include "esphome/core/component.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/text_sensor/text_sensor.h"
-#include "../bryant_framer/bryant_framer.h"
+#include "esphome/components/bryant_framer/bryant_frame.h"
 #include <string>
 #include <vector>
 #include <utility>

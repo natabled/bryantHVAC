@@ -22,16 +22,20 @@ void BryantParser::on_frame(const bryant_framer::FrameView &f) {
   const uint16_t reg = static_cast<uint16_t>((static_cast<uint16_t>(f.payload[1]) << 8) | f.payload[2]);
   const MessageDef *message = nullptr;
   for (const auto &m : messages_) {
-    if (m.dst == f.dst && m.src == f.src && m.function == f.function &&
+    if (m.dst == f.dest && m.src == f.src && m.function == f.function &&
         m.reg == reg && f.length >= m.minimum) { message = &m; break; }
   }
   if (message == nullptr) {
-    if (log_unmatched_) ESP_LOGV(TAG, "unmatched frame=%" PRIu32 " dst=%02X src=%02X func=%02X reg=%04X len=%u",
-                                f.id, f.dst, f.src, f.function, reg, static_cast<unsigned>(f.length));
+    if (log_unmatched_) {
+      ESP_LOGV(TAG, "unmatched frame=%" PRIu32 " dst=%02X src=%02X func=%02X reg=%04X len=%u",
+               f.fid, f.dest, f.src, f.function, reg, static_cast<unsigned>(f.length));
+    }
     return;
   }
-  if (log_matches_) ESP_LOGD(TAG, "matched frame=%" PRIu32 " message=%s reg=%04X len=%u",
-                             f.id, message->name.c_str(), reg, static_cast<unsigned>(f.length));
+  if (log_matches_) {
+    ESP_LOGD(TAG, "matched frame=%" PRIu32 " message=%s reg=%04X len=%u",
+             f.fid, message->name.c_str(), reg, static_cast<unsigned>(f.length));
+  }
   // Date and time are published as numeric fields and a combined local ISO date-time string.
   if (message->name == "thermostat_time" && f.length >= 6) {
     hour_ = f.payload[3]; minute_ = f.payload[4]; second_ = f.payload[5];
@@ -74,8 +78,10 @@ void BryantParser::on_frame(const bryant_framer::FrameView &f) {
                field.multiplier + field.add;
     }
     field.sensor->publish_state(result);
-    if (log_matches_) ESP_LOGD(TAG, "field=%s raw=0x%" PRIX32 " value=%.3f", field.name.c_str(),
-                               raw, static_cast<double>(result));
+    if (log_matches_) {
+      ESP_LOGD(TAG, "field=%s raw=0x%" PRIX32 " value=%.3f", field.name.c_str(),
+               raw, static_cast<double>(result));
+    }
   }
 }
 void BryantParser::publish_datetime_() {
@@ -88,6 +94,8 @@ void BryantParser::publish_datetime_() {
   char iso[24];
   snprintf(iso, sizeof(iso), "%04d-%02d-%02dT%02d:%02d:%02d", year_, month_, day_, hour_, minute_, second_);
   datetime_sensor_->publish_state(iso);
-  if (log_matches_) ESP_LOGD(TAG, "thermostat datetime=%s (local, no timezone)", iso);
+  if (log_matches_) {
+    ESP_LOGD(TAG, "thermostat datetime=%s (local, no timezone)", iso);
+  }
 }
 }

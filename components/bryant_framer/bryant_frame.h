@@ -22,4 +22,10 @@ struct FrameView {
   size_t frame_size;
 };
 
+class FrameListener {
+ public:
+  virtual ~FrameListener() = default;
+  virtual void on_frame(const FrameView &frame) = 0;
+};
+
 }  // namespace bryant_framer
