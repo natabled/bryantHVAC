@@ -18,6 +18,8 @@ class BryantFramer : public esphome::Component, public esphome::uart::UARTDevice
   void set_log_frame_errors(bool value) { log_frame_errors_ = value; }
 
   void set_listener(FrameListener *listener) { listener_ = listener; }
+  uint32_t last_rx_ms() const { return last_rx_ms_; }
+  bool rx_pending() { return count_ != 0 || this->available() > 0; }
   void setup() override;
   void loop() override;
   float get_setup_priority() const override { return esphome::setup_priority::DATA; }
@@ -34,6 +36,7 @@ class BryantFramer : public esphome::Component, public esphome::uart::UARTDevice
   size_t count_{0};
   uint32_t drain_interval_ms_{7};
   uint32_t last_drain_ms_{0};
+  uint32_t last_rx_ms_{0};
   uint16_t max_payload_length_{200};
   bool log_valid_frames_{true};
   bool log_frame_errors_{true};

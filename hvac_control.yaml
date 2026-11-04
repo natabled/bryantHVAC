@@ -33,9 +33,9 @@ logger:
 external_components:
   - source:
       type: git
-      type: local
-      path: ./components
-    components: [bryant_framer, bryant_parser]
+      url: https://github.com/natabled/bryantHVAC
+    components: [bryant_framer, bryant_parser, bryant_writer]
+    refresh: always
 
 uart:
   id: hvac_uart
@@ -130,7 +130,6 @@ text_sensor:
   - platform: template
     id: hvac_datetime
     name: HVAC Date and Time
-    internal: true
     icon: mdi:calendar-clock
   - platform: debug
     reset_reason:
@@ -150,10 +149,10 @@ bryant_parser:
       match: {dst: 0xF1, src: 0x20, function: 0x0C, register: 0x0203}
       payload_min: 6
     - name: thermostat_status
-      match: {dst: 0x21, src: 0x20, function: 0x06, register: 0x3B02}
+      match: {dst: 0x92, src: 0x20, function: 0x06, register: 0x3B02}
       payload_min: 26
     - name: thermostat_heat_setpoint
-      match: {dst: 0x21, src: 0x20, function: 0x06, register: 0x3B03}
+      match: {dst: 0x92, src: 0x20, function: 0x06, register: 0x3B03}
       payload_min: 16
     - name: heat_pump_stage
       match: {dst: 0x20, src: 0x50, function: 0x06, register: 0x3E02}
@@ -177,36 +176,30 @@ bryant_parser:
     - {name: month, message: thermostat_date, sensor_id: hvac_month, offset: 4}
     - {name: year, message: thermostat_date, sensor_id: hvac_year, offset: 5}
 
-# Native ESPHome datetime entity. Read-only: no set_action or optimistic state.
-datetime:
-  - platform: template
-    id: hvac_native_datetime
-    name: HVAC Date and Time (Native)
-    type: datetime
-    update_interval: 15s
-    lambda: |-
-      if (isnan(id(hvac_year).state) || isnan(id(hvac_month).state) ||
-          isnan(id(hvac_day).state) || isnan(id(hvac_hour).state) ||
-          isnan(id(hvac_minute).state) || isnan(id(hvac_second).state)) {
-        return {};
-      }
-      ESPTime t{};
-      t.year = 2000 + (int) id(hvac_year).state;
-      t.month = (int) id(hvac_month).state;
-      t.day_of_month = (int) id(hvac_day).state;
-      t.hour = (int) id(hvac_hour).state;
-      t.minute = (int) id(hvac_minute).state;
-      t.second = (int) id(hvac_second).state;
-      if (t.month < 1 || t.month > 12 || t.day_of_month < 1 ||
-          t.day_of_month > 31 || t.hour > 23 || t.minute > 59 || t.second > 59)
-        return {};
-      return {t};
+# Read-only date/time is published by bryant_parser to text_sensor.hvac_datetime.
+# Native datetime template with lambda is not used because it expects a writable
+# or optimistic configuration. The six raw date/time sensors stay internal.
+
+bryant_writer:
+  id: hvac_writer
+  uart_id: hvac_uart
+  framer_id: hvac_framer
+  idle_ms: 50
+  poll_interval: 50s
+  log_tx: true
+  polls:
+    - name: thermostat_status
+      frame: "20 01 92 01 03 00 00 0B 00 3B 02 2D 7A"
+      offset_ms: 0
+    - name: thermostat_heat_setpoint
+      frame: "20 01 92 01 03 00 00 0B 00 3B 03 EC BA"
+      offset_ms: 350
 
 # Observational climate entity: frontend commands are ignored; nothing is sent.
 climate:
   - platform: template
     id: bryant_climate
-    name: Bryant HVAC Monitor
+    name: Bryant HVAC
     sensor: hvac_indoor_c
     supported_modes: ["OFF", HEAT, COOL, AUTO]
     optimistic: false
@@ -233,7 +226,7 @@ interval:
                 id: bryant_climate
                 target_temperature: !lambda 'return (id(m212063b03f23).state - 32.0f) * (5.0f / 9.0f);'
 
-# Manual raw-hex diagnostic transmission (no automatic CRC).
+# Manual raw-hex diagnostic transmission (CRC and length verified by writer).
 # Disabled by default; turn on the switch deliberately before pressing the button.
 text:
   - platform: template
@@ -257,41 +250,14 @@ button:
     on_press:
       - lambda: |-
           if (!id(hvac_tx_enabled).state) {
-            ESP_LOGW("hvac_tx", "TX blocked: enable manual transmit first");
+            ESP_LOGW("hvac_tx", "TX blocked: manual transmit disabled");
             return;
           }
-          const std::string input = id(hvac_tx_hex).state;
-          std::vector<uint8_t> bytes;
-          int nibble = -1;
-          for (char c : input) {
-            if (c == ' ' || c == ':' || c == '-' || c == '\\t' ||
-                c == '\\r' || c == '\\n') continue;
-            int digit = -1;
-            if (c >= '0' && c <= '9') digit = c - '0';
-            else if (c >= 'a' && c <= 'f') digit = c - 'a' + 10;
-            else if (c >= 'A' && c <= 'F') digit = c - 'A' + 10;
-            if (digit < 0) {
-              ESP_LOGW("hvac_tx", "Invalid hex character; no TX");
-              return;
-            }
-            if (nibble < 0) nibble = digit;
-            else {
-              bytes.push_back((uint8_t) ((nibble << 4) | digit));
-              nibble = -1;
-            }
+          const bool accepted = id(hvac_writer).enqueue_hex(id(hvac_tx_hex).state);
+          if (accepted) {
+            ESP_LOGI("hvac_tx", "Manual frame queued; awaiting bus idle");
+            id(hvac_tx_enabled).turn_off();
           }
-          if (nibble >= 0 || bytes.size() < 10 || bytes.size() > 265) {
-            ESP_LOGW("hvac_tx", "TX rejected: odd digits or invalid length");
-            return;
-          }
-          if (bytes.size() != (size_t) bytes[4] + 10U) {
-            ESP_LOGW("hvac_tx", "TX rejected: LEN does not match frame size");
-            return;
-          }
-          id(hvac_uart).write_array(bytes.data(), bytes.size());
-          ESP_LOGI("hvac_tx", "Sent %u raw bytes (CRC NOT verified)",
-                   static_cast<unsigned>(bytes.size()));
-          id(hvac_tx_enabled).turn_off();
 
 debug:
   update_interval: 30s

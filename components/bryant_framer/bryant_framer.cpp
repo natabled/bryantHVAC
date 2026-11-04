@@ -50,6 +50,7 @@ void BryantFramer::drain_uart_() {
   size_t drained = 0;
   while (available() > 0) {
     if (!read_byte(&byte)) break;
+    last_rx_ms_ = millis();
     push_(byte);
     ++drained;
   }
