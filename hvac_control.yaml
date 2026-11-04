@@ -234,7 +234,7 @@ text:
     name: HVAC Raw TX Hex
     mode: text
     optimistic: true
-    max_length: 530
+    max_length: 250
 
 switch:
   - platform: template

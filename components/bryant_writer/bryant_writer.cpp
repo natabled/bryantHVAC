@@ -71,14 +71,14 @@ bool BryantWriter::queue_(const std::string &name, const std::vector<uint8_t> &f
     ESP_LOGW(TAG, "Rejected '%s': invalid frame length or CRC", name.c_str());
     return false;
   }
-  for (const auto &item : queue_) {
+  for (const auto &item : pending_frames_) {
     if (!manual && item.name == name) return true;  // coalesce stale poll requests
   }
-  if (queue_.size() >= MAX_QUEUE) {
+  if (pending_frames_.size() >= MAX_QUEUE) {
     ESP_LOGW(TAG, "TX queue full; dropped '%s'", name.c_str());
     return false;
   }
-  queue_.push_back({name, frame, manual});
+  pending_frames_.push_back({name, frame, manual});
   if (log_tx_) {
     ESP_LOGD(TAG, "Queued '%s' (%u bytes)", name.c_str(), static_cast<unsigned>(frame.size()));
   }
@@ -105,7 +105,7 @@ void BryantWriter::schedule_polls_(uint32_t now) {
 void BryantWriter::loop() {
   const uint32_t now = millis();
   schedule_polls_(now);
-  if (queue_.empty() || framer_ == nullptr) return;
+  if (pending_frames_.empty() || framer_ == nullptr) return;
   // Keep the UART framer as the sole RX consumer. If any bytes are buffered or
   // any frame is partially assembled, do not transmit.
   if (framer_->rx_pending() || this->available() > 0) {
@@ -128,7 +128,7 @@ void BryantWriter::loop() {
     quiet_started_ms_ = 0;
     return;
   }
-  const auto &next = queue_.front();
+  const auto &next = pending_frames_.front();
   this->write_array(next.frame.data(), next.frame.size());
   this->flush();
   last_tx_ms_ = millis();
@@ -136,7 +136,7 @@ void BryantWriter::loop() {
     ESP_LOGI(TAG, "TX '%s' %u bytes (no bus arbitration)", next.name.c_str(),
              static_cast<unsigned>(next.frame.size()));
   }
-  queue_.pop_front();
+  pending_frames_.pop_front();
   quiet_started_ms_ = 0;
 }
 }  // namespace bryant_writer

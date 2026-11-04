@@ -40,7 +40,7 @@ class BryantWriter : public esphome::Component, public esphome::uart::UARTDevice
   void schedule_polls_(uint32_t now);
   bryant_framer::BryantFramer *framer_{nullptr};
   std::vector<Poll> polls_;
-  std::deque<Pending> queue_;
+  std::deque<Pending> pending_frames_;
   uint32_t idle_ms_{50};
   uint32_t poll_interval_ms_{50000};
   uint32_t last_tx_ms_{0};
