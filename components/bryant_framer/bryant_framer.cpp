@@ -1,6 +1,7 @@
 #include "bryant_framer.h"
 #include <algorithm>
 #include <cstdio>
+#include <inttypes.h>
 
 namespace bryant_framer {
 static const char *const TAG = "bryant_framer";
@@ -9,7 +10,7 @@ void BryantFramer::setup() {
   if (ring_capacity_ > RING_STORAGE_SIZE) ring_capacity_ = RING_STORAGE_SIZE;
   if (ring_capacity_ < 256) ring_capacity_ = 256;
   if (drain_interval_ms_ == 0) drain_interval_ms_ = 7;
-  ESP_LOGI(TAG, "Framer ready: drain=%ums ring=%u max_payload=%u", drain_interval_ms_,
+  ESP_LOGI(TAG, "Framer ready: drain=%" PRIu32 "ms ring=%u max_payload=%u", drain_interval_ms_,
            static_cast<unsigned>(ring_capacity_), max_payload_length_);
 }
 
@@ -38,7 +39,7 @@ void BryantFramer::push_(uint8_t byte) {
     pop_(1);
     ++overflows_;
     ++discarded_bytes_;
-    if (log_frame_errors_) ESP_LOGE(TAG, "RX ring overflow #%u; discarded oldest byte", overflows_);
+    if (log_frame_errors_) ESP_LOGE(TAG, "RX ring overflow #%" PRIu32 "; discarded oldest byte", overflows_);
   }
   ring_[(head_ + count_) % ring_capacity_] = byte;
   ++count_;
@@ -115,7 +116,7 @@ void BryantFramer::process_frames_() {
     if (calc_crc != rx_crc) {
       ++crc_failures_;
       if (log_frame_errors_) {
-        ESP_LOGW(TAG, "CRC FAIL #%u: offset=0 frame_size=%u payload_len=%u rx=%04X calc=%04X",
+        ESP_LOGW(TAG, "CRC FAIL #%" PRIu32 ": offset=0 frame_size=%u payload_len=%u rx=%04X calc=%04X",
                  crc_failures_, static_cast<unsigned>(frame_size), payload_length, rx_crc, calc_crc);
         log_frame_(frame.data(), frame_size, 0, millis());
       }
@@ -129,6 +130,10 @@ void BryantFramer::process_frames_() {
     const uint32_t fid = ++valid_frames_;
     const uint32_t rcv_ms = millis();
     if (log_valid_frames_) log_frame_(frame.data(), frame_size, fid, rcv_ms);
+    if (listener_ != nullptr) {
+      const FrameView view{fid, rcv_ms, frame[0], frame[2], frame[7], frame[4], frame.data() + HEADER_SIZE};
+      listener_->on_frame(view);  // synchronous; frame storage is valid until return
+    }
     pop_(frame_size);  // consume the full frame; following frame remains queued
   }
 }
@@ -157,13 +162,13 @@ void BryantFramer::log_frame_(const uint8_t *frame, size_t size, uint32_t fid, u
   size_t pos = 0;
   for (size_t i = 0; i < size && pos + 4 < sizeof(hex); ++i)
     pos += static_cast<size_t>(snprintf(hex + pos, sizeof(hex) - pos, "%02X%s", frame[i], i + 1 == size ? "" : " "));
-  ESP_LOGD(TAG, "FRAME fid=%u rcv_ms=%u dst=%02X/%02X src=%02X/%02X len=%u pid=%02X ext=%02X func=%02X size=%u raw=[%s]",
+  ESP_LOGD(TAG, "FRAME fid=%" PRIu32 " rcv_ms=%" PRIu32 " dst=%02X/%02X src=%02X/%02X len=%u pid=%02X ext=%02X func=%02X size=%u raw=[%s]",
            fid, rcv_ms, frame[0], frame[1], frame[2], frame[3], frame[4], frame[5], frame[6], frame[7],
            static_cast<unsigned>(size), hex);
 }
 
 void BryantFramer::log_error_(const char *reason, size_t offset, size_t expected, size_t available) {
-  ESP_LOGW(TAG, "FRAME ERROR: %s offset=%u expected=%u available=%u totals(valid=%u crc_fail=%u discarded=%u overflow=%u)",
+  ESP_LOGW(TAG, "FRAME ERROR: %s offset=%u expected=%u available=%u totals(valid=%" PRIu32 " crc_fail=%" PRIu32 " discarded=%" PRIu32 " overflow=%" PRIu32 ")",
            reason, static_cast<unsigned>(offset), static_cast<unsigned>(expected), static_cast<unsigned>(available),
            valid_frames_, crc_failures_, discarded_bytes_, overflows_);
 }

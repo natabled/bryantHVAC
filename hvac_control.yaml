@@ -2,7 +2,7 @@
 # Parser, climate component, and writer intentionally omitted.
 esphome:
   name: bryant-hvac
-  friendly_name: Bryant HVAC Framer
+  friendly_name: Bryant HVAC
   platformio_options:
     board_build.flash_mode: dio
 
@@ -35,7 +35,7 @@ external_components:
   - source:
       type: git
       url: https://github.com/natabled/bryantHVAC
-    components: [bryant_framer]
+    components: [bryant_framer, bryant_parser]
 
 uart:
   id: hvac_uart
@@ -55,3 +55,97 @@ bryant_framer:
   max_payload_length: 200
   log_valid_frames: true
   log_frame_errors: true
+
+# Numeric sensors preserve v2.01 IDs; the combined date-time is local ISO text.
+sensor:
+  - platform: template
+    id: m212063b02f14
+    name: Indoor Temperature
+    unit_of_measurement: "°F"
+    device_class: temperature
+    accuracy_decimals: 0
+  - platform: template
+    id: m212063b02f33
+    name: HVAC Mode Raw
+    accuracy_decimals: 0
+  - platform: template
+    id: m212063b03f23
+    name: HVAC Heat Setpoint
+    unit_of_measurement: "°F"
+    device_class: temperature
+    accuracy_decimals: 0
+  - platform: template
+    id: heat_pump_state
+    name: Heat Pump State
+    accuracy_decimals: 0
+  - platform: template
+    id: hvac_hour
+    name: HVAC Hour
+    accuracy_decimals: 0
+  - platform: template
+    id: hvac_minute
+    name: HVAC Minute
+    accuracy_decimals: 0
+  - platform: template
+    id: hvac_second
+    name: HVAC Second
+    accuracy_decimals: 0
+  - platform: template
+    id: hvac_day
+    name: HVAC Day
+    accuracy_decimals: 0
+  - platform: template
+    id: hvac_month
+    name: HVAC Month
+    accuracy_decimals: 0
+  - platform: template
+    id: hvac_year
+    name: HVAC Year (2-digit)
+    accuracy_decimals: 0
+
+text_sensor:
+  - platform: template
+    id: hvac_datetime
+    name: HVAC Date and Time
+    icon: mdi:calendar-clock
+
+bryant_parser:
+  id: hvac_parser
+  framer_id: hvac_framer
+  datetime_text_id: hvac_datetime
+  log_matches: true
+  log_unmatched: false
+  messages:
+    - name: thermostat_time
+      match: {dst: 0xF1, src: 0x20, function: 0x0C, register: 0x0202}
+      payload_min: 6
+    - name: thermostat_date
+      match: {dst: 0xF1, src: 0x20, function: 0x0C, register: 0x0203}
+      payload_min: 6
+    - name: thermostat_status
+      match: {dst: 0x21, src: 0x20, function: 0x06, register: 0x3B02}
+      payload_min: 26
+    - name: thermostat_heat_setpoint
+      match: {dst: 0x21, src: 0x20, function: 0x06, register: 0x3B03}
+      payload_min: 16
+    - name: heat_pump_stage
+      match: {dst: 0x20, src: 0x50, function: 0x06, register: 0x3E02}
+      payload_min: 4
+  fields:
+    - {name: indoor_temp, message: thermostat_status, sensor_id: m212063b02f14, offset: 6}
+    - {name: hvac_mode, message: thermostat_status, sensor_id: m212063b02f33, offset: 25}
+    - {name: heat_setpoint, message: thermostat_heat_setpoint, sensor_id: m212063b03f23, offset: 15}
+    - name: heat_pump_stage
+      message: heat_pump_stage
+      sensor_id: heat_pump_state
+      offset: 3
+      bit_rules:
+        - {mask: 0x04, value: 2}
+        - {mask: 0x02, value: 1}
+      default: 0
+    - {name: hour, message: thermostat_time, sensor_id: hvac_hour, offset: 3}
+    - {name: minute, message: thermostat_time, sensor_id: hvac_minute, offset: 4}
+    - {name: second, message: thermostat_time, sensor_id: hvac_second, offset: 5}
+    - {name: day, message: thermostat_date, sensor_id: hvac_day, offset: 3}
+    - {name: month, message: thermostat_date, sensor_id: hvac_month, offset: 4}
+    - {name: year, message: thermostat_date, sensor_id: hvac_year, offset: 5}

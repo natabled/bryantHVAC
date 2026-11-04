@@ -8,6 +8,17 @@
 
 namespace bryant_framer {
 
+struct FrameView {
+  uint32_t id, received_ms;
+  uint8_t dst, src, function, length;
+  const uint8_t *payload;  // raw frame bytes [8..8+length); excludes CRC
+};
+class FrameListener {
+ public:
+  virtual ~FrameListener() = default;
+  virtual void on_frame(const FrameView &frame) = 0;
+};
+
 class BryantFramer : public esphome::Component, public esphome::uart::UARTDevice {
  public:
   void set_drain_interval_ms(uint32_t value) { drain_interval_ms_ = value; }
@@ -16,6 +27,7 @@ class BryantFramer : public esphome::Component, public esphome::uart::UARTDevice
   void set_log_valid_frames(bool value) { log_valid_frames_ = value; }
   void set_log_frame_errors(bool value) { log_frame_errors_ = value; }
 
+  void set_listener(FrameListener *listener) { listener_ = listener; }
   void setup() override;
   void loop() override;
   float get_setup_priority() const override { return esphome::setup_priority::DATA; }
@@ -39,6 +51,7 @@ class BryantFramer : public esphome::Component, public esphome::uart::UARTDevice
   uint32_t crc_failures_{0};
   uint32_t discarded_bytes_{0};
   uint32_t overflows_{0};
+  FrameListener *listener_{nullptr};
 
   bool header_at_(size_t offset) const;
   bool find_header_(size_t *offset) const;
