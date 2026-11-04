@@ -65,7 +65,7 @@ bool BryantFramer::header_at_(size_t offset) const {
   // Recognizable known bus header: address,bus,address,bus; special F1 F1 prefix.
   if (a == 0xF1 && b == 0xF1 && c == 0x20 && d == 0x01) return true;
   if (b != 0x01 || d != 0x01) return false;
-  const uint8_t known[] = {0x20, 0x21, 0x40, 0x41, 0x50};
+  const uint8_t known[] = {0x20, 0x21, 0x40, 0x41, 0x50, 0x92};
   bool dest_ok = false, src_ok = false;
   for (uint8_t v : known) { dest_ok |= a == v; src_ok |= c == v; }
   return dest_ok && src_ok;
