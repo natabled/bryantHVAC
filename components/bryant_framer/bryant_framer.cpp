@@ -21,6 +21,7 @@ void BryantFramer::loop() {
     drain_uart_();
     process_frames_();
   }
+  if (diag_dirty_ || static_cast<uint32_t>(now - last_diag_ms_) >= 10000) publish_diagnostics_();
 }
 
 uint8_t BryantFramer::peek_(size_t offset) const {
@@ -37,6 +38,7 @@ void BryantFramer::push_(uint8_t byte) {
   if (count_ >= ring_capacity_) {
     // Retain newest stream bytes; overflow is counted and logged explicitly.
     pop_(1);
+    lose_sync_("RX overflow");
     ++overflows_;
     ++discarded_bytes_;
     if (log_frame_errors_) ESP_LOGE(TAG, "RX ring overflow #%" PRIu32 "; discarded oldest byte", overflows_);
@@ -62,54 +64,67 @@ void BryantFramer::drain_uart_() {
 
 bool BryantFramer::header_at_(size_t offset) const {
   if (offset + 3 >= count_) return false;
-  const uint8_t a = peek_(offset), b = peek_(offset + 1), c = peek_(offset + 2), d = peek_(offset + 3);
-  // Recognizable known bus header: address,bus,address,bus; special F1 F1 prefix.
-  if (a == 0xF1 && b == 0xF1 && c == 0x20 && d == 0x01) return true;
-  if (b != 0x01 || d != 0x01) return false;
-  const uint8_t known[] = {0x20, 0x21, 0x40, 0x41, 0x50, 0x92};
-  bool dest_ok = false, src_ok = false;
-  for (uint8_t v : known) { dest_ok |= a == v; src_ok |= c == v; }
-  return dest_ok && src_ok;
+  // Address values are intentionally unrestricted. Only the bus-address
+  // structure is checked; F1/F1 is the documented broadcast exception.
+  const uint8_t a = peek_(offset), b = peek_(offset + 1);
+  const uint8_t c = peek_(offset + 2), d = peek_(offset + 3);
+  return (b == 0x01 && d == 0x01) ||
+         (a == 0xF1 && b == 0xF1 && d == 0x01);
 }
 
-bool BryantFramer::find_header_(size_t *offset) const {
-  if (count_ < 4) return false;
-  for (size_t i = 0; i + 3 < count_; ++i) {
-    if (header_at_(i)) { *offset = i; return true; }
+void BryantFramer::lose_sync_(const char *reason) {
+  if (synced_) {
+    synced_ = false;
+    ++sync_restarts_;
+    diag_dirty_ = true;
+    if (log_frame_errors_)
+      ESP_LOGW(TAG, "Lost frame boundary: %s; restarts=%" PRIu32, reason, sync_restarts_);
   }
-  return false;
+  candidate_start_ms_ = 0;
+}
+
+void BryantFramer::publish_diagnostics_() {
+  if (sync_restarts_sensor_ != nullptr) sync_restarts_sensor_->publish_state(sync_restarts_);
+  if (sync_acquisitions_sensor_ != nullptr) sync_acquisitions_sensor_->publish_state(sync_acquisitions_);
+  if (sync_state_sensor_ != nullptr) sync_state_sensor_->publish_state(synced_ ? 1 : 0);
+  last_diag_ms_ = millis();
+  diag_dirty_ = false;
 }
 
 void BryantFramer::process_frames_() {
+  // In SEARCH, slide one byte at a time until a structurally plausible,
+  // CRC-valid complete frame is found. In SYNCED, consume each complete
+  // frame at the known boundary, without an address whitelist or scan.
   while (count_ >= HEADER_SIZE) {
-    size_t header_offset = 0;
-    if (!find_header_(&header_offset)) {
-      // Preserve at most three trailing bytes for a header split across drains.
-      const size_t discard = count_ > 3 ? count_ - 3 : 0;
-      if (discard) {
-        discarded_bytes_ += discard;
-        if (log_frame_errors_) log_error_("no recognizable header", 0, 4, count_);
-        pop_(discard);
-      }
-      return;
+    if (!header_at_(0)) {
+      lose_sync_("invalid header structure");
+      ++discarded_bytes_;
+      pop_(1);
+      continue;
     }
-    if (header_offset) {
-      discarded_bytes_ += header_offset;
-      if (log_frame_errors_) log_error_("resync: bytes before header", 0, header_offset, count_);
-      pop_(header_offset);
-    }
-    if (count_ < HEADER_SIZE) return;
 
     const uint8_t payload_length = peek_(4);
     if (payload_length > max_payload_length_) {
+      lose_sync_("payload length out of bounds");
       ++discarded_bytes_;
-      if (log_frame_errors_) log_error_("payload length out of configured bounds", 4,
-                                         payload_length, max_payload_length_);
-      pop_(1);  // slide one byte, so a subsequent valid header can be found
+      pop_(1);
       continue;
     }
+
     const size_t frame_size = HEADER_SIZE + payload_length + CRC_SIZE;
-    if (count_ < frame_size) return;  // wait for the complete frame, without dropping bytes
+    if (count_ < frame_size) {
+      // A partial candidate is normal across UART drains. If its declared
+      // length never arrives, slide one byte and resume searching. This is
+      // NOT an idle-bus sync timeout: no candidate means no timeout.
+      const uint32_t now = millis();
+      if (candidate_start_ms_ == 0) candidate_start_ms_ = now ? now : 1;
+      if (static_cast<uint32_t>(now - candidate_start_ms_) < sync_timeout_ms_) return;
+      lose_sync_("incomplete frame timeout");
+      ++discarded_bytes_;
+      pop_(1);
+      continue;
+    }
+    candidate_start_ms_ = 0;
 
     std::array<uint8_t, MAX_FRAME_SIZE> frame{};
     for (size_t i = 0; i < frame_size; ++i) frame[i] = peek_(i);
@@ -119,28 +134,37 @@ void BryantFramer::process_frames_() {
     if (calc_crc != rx_crc) {
       ++crc_failures_;
       if (log_frame_errors_) {
-        ESP_LOGW(TAG, "CRC FAIL #%" PRIu32 ": offset=0 frame_size=%u payload_len=%u rx=%04X calc=%04X",
+        ESP_LOGW(TAG, "CRC FAIL #%" PRIu32 ": size=%u len=%u rx=%04X calc=%04X",
                  crc_failures_, static_cast<unsigned>(frame_size), payload_length, rx_crc, calc_crc);
         log_frame_(frame.data(), frame_size, 0, millis());
       }
-      // Minimal byte discard is intentional: one byte allows header search to recover
-      // if this candidate was noise or a false-positive header.
+      lose_sync_("CRC mismatch");
       ++discarded_bytes_;
       pop_(1);
       continue;
     }
 
+    if (!synced_) {
+      synced_ = true;
+      ++sync_acquisitions_;
+      diag_dirty_ = true;
+      if (log_frame_errors_)
+        ESP_LOGI(TAG, "Frame synchronization acquired (#%" PRIu32 ")", sync_acquisitions_);
+    }
     const uint32_t fid = ++valid_frames_;
     const uint32_t rcv_ms = millis();
-    if (log_valid_frames_ && should_log_frame_(frame.data(), frame_size)) log_frame_(frame.data(), frame_size, fid, rcv_ms);
+    if (log_valid_frames_ && should_log_frame_(frame.data(), frame_size))
+      log_frame_(frame.data(), frame_size, fid, rcv_ms);
     if (!listeners_.empty()) {
       const FrameView view{fid, rcv_ms, frame[0], frame[1], frame[2], frame[3],
                            frame[4], frame[5], frame[6], frame[7],
                            frame.data() + HEADER_SIZE, frame_size};
-      for (auto *listener : listeners_) listener->on_frame(view);  // synchronous; storage valid until return
+      for (auto *listener : listeners_) listener->on_frame(view);
     }
-    pop_(frame_size);  // consume the full frame; following frame remains queued
+    pop_(frame_size);
   }
+  // No frame candidate: keep the sync state through arbitrarily long idle
+  // gaps. Any trailing bytes remain buffered until the next UART drain.
 }
 
 uint8_t bitreverse8_(uint8_t x) {
