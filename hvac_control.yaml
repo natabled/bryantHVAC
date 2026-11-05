@@ -37,7 +37,7 @@ external_components:
   - source:
       type: git
       url: https://github.com/natabled/bryantHVAC
-    components: [bryant_framer, bryant_parser, bryant_writer]
+    components: [bryant_framer, bryant_parser, bryant_writer, bryant_set]
     refresh: always
 
 uart:
@@ -118,6 +118,38 @@ sensor:
     internal: true
     accuracy_decimals: 0
 
+  - platform: template
+    id: hvac_cool_setpoint
+    name: HVAC Cool Setpoint
+    unit_of_measurement: "°F"
+    device_class: temperature
+    accuracy_decimals: 0
+
+  - platform: template
+    id: hvac_fan_mode_raw
+    name: HVAC Fan Mode Raw
+    accuracy_decimals: 0
+
+  - platform: template
+    id: hvac_fan_speed_raw
+    name: HVAC Fan Speed Raw
+    accuracy_decimals: 0
+
+  - platform: template
+    id: hvac_zones_holding_raw
+    name: HVAC Zones Holding Raw
+    accuracy_decimals: 0
+
+  - platform: template
+    id: hvac_timed_holds_raw
+    name: HVAC Timed Holds Raw
+    accuracy_decimals: 0
+
+  - platform: template
+    id: hvac_hold_duration_raw
+    name: HVAC Hold Duration Raw
+    accuracy_decimals: 0
+
   - platform: debug
     free:
       name: Atom Free Heap
@@ -160,7 +192,7 @@ bryant_parser:
       payload_min: 26
     - name: thermostat_heat_setpoint
       match: {dst: 0x92, src: 0x20, function: 0x06, register: 0x3B03}
-      payload_min: 16
+      payload_min: 43
     - name: heat_pump_stage
       match: {dst: 0x20, src: 0x50, function: 0x06, register: 0x3E02}
       payload_min: 4
@@ -182,6 +214,15 @@ bryant_parser:
     - {name: day, message: thermostat_date, sensor_id: hvac_day, offset: 3}
     - {name: month, message: thermostat_date, sensor_id: hvac_month, offset: 4}
     - {name: year, message: thermostat_date, sensor_id: hvac_year, offset: 5}
+    # Register 3B03 — zone 1
+    - {name: cool_setpoint, message: thermostat_heat_setpoint, sensor_id: hvac_cool_setpoint, offset: 23}
+    - {name: fan_mode, message: thermostat_heat_setpoint, sensor_id: hvac_fan_mode_raw, offset: 6}
+    - {name: fan_speed, message: thermostat_heat_setpoint, sensor_id: hvac_fan_speed_raw, offset: 39}
+    - {name: zones_holding, message: thermostat_heat_setpoint, sensor_id: hvac_zones_holding_raw, offset: 14}
+    - {name: timed_holds, message: thermostat_heat_setpoint, sensor_id: hvac_timed_holds_raw, offset: 40}
+    # First byte of zone 1 hold duration (MSB).
+    - {name: hold_duration_high, message: thermostat_heat_setpoint, sensor_id: hvac_hold_duration_raw, offset: 41}
+    
 
 # Read-only date/time is published by bryant_parser to text_sensor.hvac_datetime.
 # Native datetime template with lambda is not used because it expects a writable

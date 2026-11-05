@@ -53,7 +53,7 @@ bool BryantSet::build_write_(const bryant_framer::FrameView &f) {
   if (f.length != REG_LEN + 3 || f.payload == nullptr) return false;
   std::vector<uint8_t> body;
   body.reserve(8 + f.length);
-  body.insert(body.end(), {thermostat_, 0x01, sam_, 0x01, f.length, 0x00, 0x00, 0x0B,
+  body.insert(body.end(), {thermostat_, 0x01, sam_, 0x01, f.length, 0x00, 0x00, 0x0C,
                            0x00, 0x3B, 0x03});
   body.insert(body.end(), f.payload + 3, f.payload + f.length);
   // Register data bytes 0..2 are zone index, reserved, change flags.
