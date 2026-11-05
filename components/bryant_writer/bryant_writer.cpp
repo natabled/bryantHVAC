@@ -159,6 +159,21 @@ void BryantWriter::loop() {
   if (log_tx_) {
     ESP_LOGI(TAG, "TX '%s' %u bytes (no bus arbitration)", next.name.c_str(),
              static_cast<unsigned>(next.frame.size()));
+    // Full frame, including CRC, for byte-for-byte comparison with RX logs.
+    // Use bounded chunks to avoid ESP logger line-length truncation.
+    for (size_t offset = 0; offset < next.frame.size(); offset += 32) {
+      char hex[32 * 3 + 1];
+      size_t pos = 0;
+      const size_t end = (offset + 32 < next.frame.size() ? offset + 32 : next.frame.size());
+      for (size_t i = offset; i < end; ++i) {
+        const int written = snprintf(hex + pos, sizeof(hex) - pos,
+                                     i == offset ? "%02X" : " %02X", next.frame[i]);
+        if (written <= 0) break;
+        pos += static_cast<size_t>(written);
+      }
+      ESP_LOGD(TAG, "TX '%s' offset=%u: %s", next.name.c_str(),
+               static_cast<unsigned>(offset), hex);
+    }
   }
   const std::string sent_name = next.name;
   pending_frames_.pop_front();
