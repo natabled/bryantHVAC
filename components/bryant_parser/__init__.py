@@ -18,6 +18,7 @@ MATCH = cv.Schema({
 MESSAGE = cv.Schema({
     cv.Required("name"): cv.string,
     cv.Required("match"): MATCH,
+    cv.Optional("log", default=True): cv.boolean,
     cv.Optional("payload_min", default=3): cv.int_range(min=3, max=255),
 })
 BIT_RULE = cv.Schema({
@@ -73,7 +74,8 @@ async def to_code(config):
         cg.add(var.set_datetime_sensor(t))
     for msg in config["messages"]:
         m = msg["match"]
-        cg.add(var.add_message(msg["name"], m["dst"], m["src"], m["function"], m["register"], msg["payload_min"]))
+        cg.add(var.add_message(msg["name"], m["dst"], m["src"], m["function"], m["register"], msg["payload_min"], msg["log"]))
+        cg.add(framer.add_log_filter(m["dst"], m["src"], m["function"], m["register"], msg["log"]))
     for field in config["fields"]:
         s = await cg.get_variable(field["sensor_id"])
         cg.add(var.add_field(field["name"], field["message"], s, field["offset"], field["width"],

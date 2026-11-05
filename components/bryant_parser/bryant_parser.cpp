@@ -4,8 +4,8 @@
 namespace bryant_parser {
 static const char *const TAG = "bryant_parser";
 void BryantParser::add_message(const std::string &name, uint8_t dst, uint8_t src,
-                               uint8_t func, uint16_t reg, uint8_t min_len) {
-  messages_.push_back({name, dst, src, func, reg, min_len});
+                               uint8_t func, uint16_t reg, uint8_t min_len, bool log) {
+  messages_.push_back({name, dst, src, func, reg, min_len, log});
 }
 void BryantParser::add_field(const std::string &name, const std::string &message,
                              esphome::sensor::Sensor *sensor, uint8_t offset, uint8_t width,
@@ -32,10 +32,11 @@ void BryantParser::on_frame(const bryant_framer::FrameView &f) {
     }
     return;
   }
-  if (log_matches_) {
+  if (log_matches_ && message->log) {
     ESP_LOGD(TAG, "matched frame=%" PRIu32 " message=%s reg=%04X len=%u",
              f.fid, message->name.c_str(), reg, static_cast<unsigned>(f.length));
   }
+  datetime_log_enabled_ = message->log;
   // Date and time are published as numeric fields and a combined local ISO date-time string.
   if (message->name == "thermostat_time" && f.length >= 6) {
     hour_ = f.payload[3]; minute_ = f.payload[4]; second_ = f.payload[5];
@@ -78,7 +79,7 @@ void BryantParser::on_frame(const bryant_framer::FrameView &f) {
                field.multiplier + field.add;
     }
     field.sensor->publish_state(result);
-    if (log_matches_) {
+    if (log_matches_ && message->log) {
       ESP_LOGD(TAG, "field=%s raw=0x%" PRIX32 " value=%.3f", field.name.c_str(),
                raw, static_cast<double>(result));
     }
@@ -94,7 +95,7 @@ void BryantParser::publish_datetime_() {
   char iso[24];
   snprintf(iso, sizeof(iso), "%04d-%02d-%02dT%02d:%02d:%02d", year_, month_, day_, hour_, minute_, second_);
   datetime_sensor_->publish_state(iso);
-  if (log_matches_) {
+  if (log_matches_ && datetime_log_enabled_) {
     ESP_LOGD(TAG, "thermostat datetime=%s (local, no timezone)", iso);
   }
 }

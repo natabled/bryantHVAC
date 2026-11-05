@@ -4,7 +4,7 @@ esphome:
   friendly_name: Bryant HVAC
   project: 
     name: 'chatgpt.bryant-hvac'
-    version: '3.2'
+    version: '3.23'
   platformio_options:
     board_build.flash_mode: dio
 
@@ -29,16 +29,39 @@ wifi:
   use_address: !secret hvac_atom_static_ip
   power_save_mode: none
   
+udp:
+  id: syslog_udp
+  addresses: 192.168.0.7
+  port: 514
+
+syslog:
+  id: syslog_hvac
+  udp_id: syslog_udp
+  time_id: sntp_time
+  port: 514
+  level: INFO
+
 logger:
   level: DEBUG
   baud_rate: 0
+
+# SNTP Time Source
+time:
+  - platform: sntp
+    id: sntp_time
+    servers: 
+      - 129.6.15.28
+    timezone: "EST5EDT,M3.2.0,M11.1.0" #America/New_York
+    on_time_sync: 
+      then:
+        - logger.log: "SNTP time synced"
 
 external_components:
   - source:
       type: git
       url: https://github.com/natabled/bryantHVAC
     components: [bryant_framer, bryant_parser, bryant_writer, bryant_set]
-    refresh: always
+    refresh: 24h
 
 uart:
   id: hvac_uart
@@ -182,9 +205,11 @@ bryant_parser:
   log_unmatched: false
   messages:
     - name: thermostat_time
+      log: false
       match: {dst: 0xF1, src: 0x20, function: 0x0C, register: 0x0202}
       payload_min: 6
     - name: thermostat_date
+      log: false
       match: {dst: 0xF1, src: 0x20, function: 0x0C, register: 0x0203}
       payload_min: 6
     - name: thermostat_status
@@ -307,7 +332,18 @@ text:
     mode: text
     optimistic: true
     max_length: 250
-
+  - platform: template
+    id: log_observer
+    name: Log Observer
+    mode: TEXT
+    optimistic: true
+    max_length: 128
+    on_value:
+      then:
+        - logger.log:
+            format: "OBSERVER %s"
+            args: ["x.c_str()"]
+            
 switch:
   - platform: template
     id: hvac_tx_enabled

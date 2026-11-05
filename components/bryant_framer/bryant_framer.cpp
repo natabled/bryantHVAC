@@ -132,7 +132,7 @@ void BryantFramer::process_frames_() {
 
     const uint32_t fid = ++valid_frames_;
     const uint32_t rcv_ms = millis();
-    if (log_valid_frames_) log_frame_(frame.data(), frame_size, fid, rcv_ms);
+    if (log_valid_frames_ && should_log_frame_(frame.data(), frame_size)) log_frame_(frame.data(), frame_size, fid, rcv_ms);
     if (!listeners_.empty()) {
       const FrameView view{fid, rcv_ms, frame[0], frame[1], frame[2], frame[3],
                            frame[4], frame[5], frame[6], frame[7],
@@ -162,14 +162,29 @@ uint16_t BryantFramer::crc16_carrier_(const uint8_t *data, size_t length) const 
   return static_cast<uint16_t>(bitreverse8_(crc & 0xFF) << 8 | bitreverse8_(crc >> 8));
 }
 
+bool BryantFramer::should_log_frame_(const uint8_t *frame, size_t size) const {
+  if (size < HEADER_SIZE + 3 + CRC_SIZE) return true;
+  const uint16_t reg = (static_cast<uint16_t>(frame[9]) << 8) | frame[10];
+  for (const auto &rule : log_filters_) {
+    if (frame[0] == rule.dst && frame[2] == rule.src && frame[7] == rule.function && reg == rule.reg)
+      return rule.enabled;
+  }
+  return true;  // Unconfigured message types retain existing raw logging behavior.
+}
+
 void BryantFramer::log_frame_(const uint8_t *frame, size_t size, uint32_t fid, uint32_t rcv_ms) {
-  char hex[3 * MAX_FRAME_SIZE + 1];
-  size_t pos = 0;
-  for (size_t i = 0; i < size && pos + 4 < sizeof(hex); ++i)
-    pos += static_cast<size_t>(snprintf(hex + pos, sizeof(hex) - pos, "%02X%s", frame[i], i + 1 == size ? "" : " "));
-  ESP_LOGD(TAG, "FRAME fid=%" PRIu32 " rcv_ms=%" PRIu32 " dst=%02X/%02X src=%02X/%02X len=%u pid=%02X ext=%02X func=%02X size=%u raw=[%s]",
+  // ESPHome/ESP-IDF log lines have a finite formatting buffer. Log in bounded chunks.
+  ESP_LOGD(TAG, "FRAME fid=%" PRIu32 " rcv_ms=%" PRIu32 " dst=%02X/%02X src=%02X/%02X len=%u pid=%02X ext=%02X func=%02X size=%u",
            fid, rcv_ms, frame[0], frame[1], frame[2], frame[3], frame[4], frame[5], frame[6], frame[7],
-           static_cast<unsigned>(size), hex);
+           static_cast<unsigned>(size));
+  for (size_t offset = 0; offset < size; offset += 32) {
+    char hex[32 * 3 + 1];
+    size_t pos = 0;
+    const size_t end = (offset + 32 < size) ? offset + 32 : size;
+    for (size_t i = offset; i < end; ++i)
+      pos += static_cast<size_t>(snprintf(hex + pos, sizeof(hex) - pos, "%02X%s", frame[i], i + 1 == end ? "" : " "));
+    ESP_LOGD(TAG, "FRAME fid=%" PRIu32 " offset=%u raw=[%s]", fid, static_cast<unsigned>(offset), hex);
+  }
 }
 
 void BryantFramer::log_error_(const char *reason, size_t offset, size_t expected, size_t available) {

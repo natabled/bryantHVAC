@@ -18,6 +18,10 @@ class BryantFramer : public esphome::Component, public esphome::uart::UARTDevice
   void set_log_valid_frames(bool value) { log_valid_frames_ = value; }
   void set_log_frame_errors(bool value) { log_frame_errors_ = value; }
 
+  // Per-message raw RX logging policy. First matching rule wins.
+  void add_log_filter(uint8_t dst, uint8_t src, uint8_t function, uint16_t reg, bool enabled) {
+    log_filters_.push_back({dst, src, function, reg, enabled});
+  }
   void add_listener(FrameListener *listener) { if (listener != nullptr) listeners_.push_back(listener); }
   void set_listener(FrameListener *listener) { add_listener(listener); }
   uint32_t last_rx_ms() const { return last_rx_ms_; }
@@ -46,6 +50,9 @@ class BryantFramer : public esphome::Component, public esphome::uart::UARTDevice
   uint32_t crc_failures_{0};
   uint32_t discarded_bytes_{0};
   uint32_t overflows_{0};
+  struct LogFilter { uint8_t dst, src, function; uint16_t reg; bool enabled; };
+  std::vector<LogFilter> log_filters_;
+  bool should_log_frame_(const uint8_t *frame, size_t size) const;
   std::vector<FrameListener *> listeners_;
 
   bool header_at_(size_t offset) const;

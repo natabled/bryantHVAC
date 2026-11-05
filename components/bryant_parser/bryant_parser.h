@@ -8,7 +8,7 @@
 #include <utility>
 
 namespace bryant_parser {
-struct MessageDef { std::string name; uint8_t dst, src, function; uint16_t reg; uint8_t minimum; };
+struct MessageDef { std::string name; uint8_t dst, src, function; uint16_t reg; uint8_t minimum; bool log; };
 struct FieldDef {
   std::string name, message;
   esphome::sensor::Sensor *sensor;
@@ -25,7 +25,7 @@ class BryantParser : public esphome::Component, public bryant_framer::FrameListe
   void set_log_matches(bool v) { log_matches_ = v; }
   void set_log_unmatched(bool v) { log_unmatched_ = v; }
   void set_datetime_sensor(esphome::text_sensor::TextSensor *v) { datetime_sensor_ = v; }
-  void add_message(const std::string &name, uint8_t dst, uint8_t src, uint8_t func, uint16_t reg, uint8_t min_len);
+  void add_message(const std::string &name, uint8_t dst, uint8_t src, uint8_t func, uint16_t reg, uint8_t min_len, bool log);
   void add_field(const std::string &name, const std::string &message, esphome::sensor::Sensor *sensor,
                  uint8_t offset, uint8_t width, bool is_signed, bool little_endian,
                  float multiplier, float add, uint32_t mask, uint8_t shift, float default_value);
@@ -33,6 +33,7 @@ class BryantParser : public esphome::Component, public bryant_framer::FrameListe
   void on_frame(const bryant_framer::FrameView &f) override;
  protected:
   void publish_datetime_();
+  bool datetime_log_enabled_{true};
   std::vector<MessageDef> messages_;
   std::vector<FieldDef> fields_;
   esphome::text_sensor::TextSensor *datetime_sensor_{nullptr};
