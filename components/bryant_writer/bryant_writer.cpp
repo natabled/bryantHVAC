@@ -84,6 +84,30 @@ bool BryantWriter::queue_(const std::string &name, const std::vector<uint8_t> &f
   }
   return true;
 }
+bool BryantWriter::enqueue_body(const std::string &name, const std::vector<uint8_t> &body) {
+  if (body.size() < 8 || body.size() > 263 || body.size() != static_cast<size_t>(body[4]) + 8U) {
+    ESP_LOGW(TAG, "Rejected '%s': invalid frame body length", name.c_str());
+    return false;
+  }
+  std::vector<uint8_t> full = body;
+  const uint16_t crc = crc16_(full.data(), full.size());
+  full.push_back(static_cast<uint8_t>(crc & 0xFF));
+  full.push_back(static_cast<uint8_t>(crc >> 8));
+  return queue_(name, full, true);
+}
+bool BryantWriter::enqueue_named_hex(const std::string &name, const std::string &hex) {
+  std::vector<uint8_t> frame;
+  if (!parse_hex_(hex, &frame)) return false;
+  return queue_(name, frame, true);
+}
+bool BryantWriter::cancel(const std::string &name) {
+  bool removed = false;
+  for (auto it = pending_frames_.begin(); it != pending_frames_.end();) {
+    if (it->name == name) { it = pending_frames_.erase(it); removed = true; }
+    else ++it;
+  }
+  return removed;
+}
 bool BryantWriter::enqueue_hex(const std::string &hex) {
   std::vector<uint8_t> frame;
   if (!parse_hex_(hex, &frame)) {
@@ -136,7 +160,9 @@ void BryantWriter::loop() {
     ESP_LOGI(TAG, "TX '%s' %u bytes (no bus arbitration)", next.name.c_str(),
              static_cast<unsigned>(next.frame.size()));
   }
+  const std::string sent_name = next.name;
   pending_frames_.pop_front();
   quiet_started_ms_ = 0;
+  if (tx_listener_ != nullptr) tx_listener_->on_tx_sent(sent_name, last_tx_ms_);
 }
 }  // namespace bryant_writer

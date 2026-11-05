@@ -9,6 +9,11 @@
 #include <vector>
 
 namespace bryant_writer {
+class TxListener {
+ public:
+  virtual ~TxListener() = default;
+  virtual void on_tx_sent(const std::string &name, uint32_t ms) = 0;
+};
 class BryantWriter : public esphome::Component, public esphome::uart::UARTDevice {
  public:
   void set_framer(bryant_framer::BryantFramer *framer) { framer_ = framer; }
@@ -16,6 +21,10 @@ class BryantWriter : public esphome::Component, public esphome::uart::UARTDevice
   void set_poll_interval_ms(uint32_t ms) { poll_interval_ms_ = ms; }
   void set_log_tx(bool yes) { log_tx_ = yes; }
   void add_poll(const std::string &name, const std::string &hex, uint32_t offset_ms);
+  void set_tx_listener(TxListener *listener) { tx_listener_ = listener; }
+  bool enqueue_body(const std::string &name, const std::vector<uint8_t> &body);
+  bool enqueue_named_hex(const std::string &name, const std::string &hex);
+  bool cancel(const std::string &name);
   bool enqueue_hex(const std::string &hex);  // manual diagnostic, full frame including CRC
   void setup() override;
   void loop() override;
@@ -47,6 +56,7 @@ class BryantWriter : public esphome::Component, public esphome::uart::UARTDevice
   uint32_t quiet_started_ms_{0};
   uint32_t tx_backoff_ms_{0};
   bool log_tx_{true};
+  TxListener *tx_listener_{nullptr};
   static constexpr size_t MAX_QUEUE = 4;
 };
 }  // namespace bryant_writer

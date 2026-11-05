@@ -65,7 +65,7 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     framer = await cg.get_variable(config["framer_id"])
-    cg.add(framer.set_listener(var))
+    cg.add(framer.add_listener(var))
     cg.add(var.set_log_matches(config["log_matches"]))
     cg.add(var.set_log_unmatched(config["log_unmatched"]))
     if "datetime_text_id" in config:

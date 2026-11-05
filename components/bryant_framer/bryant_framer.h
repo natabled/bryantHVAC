@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 namespace bryant_framer {
 
@@ -17,7 +18,8 @@ class BryantFramer : public esphome::Component, public esphome::uart::UARTDevice
   void set_log_valid_frames(bool value) { log_valid_frames_ = value; }
   void set_log_frame_errors(bool value) { log_frame_errors_ = value; }
 
-  void set_listener(FrameListener *listener) { listener_ = listener; }
+  void add_listener(FrameListener *listener) { if (listener != nullptr) listeners_.push_back(listener); }
+  void set_listener(FrameListener *listener) { add_listener(listener); }
   uint32_t last_rx_ms() const { return last_rx_ms_; }
   bool rx_pending() { return count_ != 0 || this->available() > 0; }
   void setup() override;
@@ -44,7 +46,7 @@ class BryantFramer : public esphome::Component, public esphome::uart::UARTDevice
   uint32_t crc_failures_{0};
   uint32_t discarded_bytes_{0};
   uint32_t overflows_{0};
-  FrameListener *listener_{nullptr};
+  std::vector<FrameListener *> listeners_;
 
   bool header_at_(size_t offset) const;
   bool find_header_(size_t *offset) const;

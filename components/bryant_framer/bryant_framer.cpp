@@ -133,11 +133,11 @@ void BryantFramer::process_frames_() {
     const uint32_t fid = ++valid_frames_;
     const uint32_t rcv_ms = millis();
     if (log_valid_frames_) log_frame_(frame.data(), frame_size, fid, rcv_ms);
-    if (listener_ != nullptr) {
+    if (!listeners_.empty()) {
       const FrameView view{fid, rcv_ms, frame[0], frame[1], frame[2], frame[3],
                            frame[4], frame[5], frame[6], frame[7],
                            frame.data() + HEADER_SIZE, frame_size};
-      listener_->on_frame(view);  // synchronous; frame storage is valid until return
+      for (auto *listener : listeners_) listener->on_frame(view);  // synchronous; storage valid until return
     }
     pop_(frame_size);  // consume the full frame; following frame remains queued
   }
