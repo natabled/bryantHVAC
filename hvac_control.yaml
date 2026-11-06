@@ -4,7 +4,7 @@ esphome:
   friendly_name: Bryant HVAC
   project: 
     name: 'chatgpt.bryant-hvac'
-    version: '3.30'
+    version: '3.33'
   platformio_options:
     board_build.flash_mode: dio
 
@@ -102,8 +102,9 @@ sensor:
     accuracy_decimals: 0
   - platform: template
     id: m212063b02f33
-    name: HVAC Mode Raw
+    name: HVAC Selected Mode Raw
     accuracy_decimals: 0
+    entity_category: diagnostic
   - platform: template
     id: m212063b03f23
     name: HVAC Heat Setpoint
@@ -154,27 +155,33 @@ sensor:
 
   - platform: template
     id: hvac_fan_mode_raw
-    name: HVAC Fan Mode Raw
+    name: HVAC Zone 1 Fan Mode Raw
     accuracy_decimals: 0
+    entity_category: diagnostic
 
   - platform: template
     id: hvac_fan_speed_raw
-    name: HVAC Fan Speed Raw
+    name: HVAC Fan Speed Raw (Unverified)
     accuracy_decimals: 0
+    entity_category: diagnostic
 
   - platform: template
     id: hvac_zones_holding_raw
-    name: HVAC Zones Holding Raw
+    name: HVAC Zone Holding Bitmask
     accuracy_decimals: 0
+    entity_category: diagnostic
 
   - platform: template
     id: hvac_timed_holds_raw
-    name: HVAC Timed Holds Raw
+    name: HVAC Timed Override Bitmask
     accuracy_decimals: 0
+    entity_category: diagnostic
 
   - platform: template
     id: hvac_hold_duration_raw
-    name: HVAC Hold Duration Raw
+    name: HVAC Zone 1 Override Remaining
+    unit_of_measurement: min
+    icon: mdi:timer-outline
     accuracy_decimals: 0
 
   - platform: debug
@@ -206,7 +213,50 @@ sensor:
     accuracy_decimals: 0
     entity_category: diagnostic
 
+binary_sensor:
+  - platform: template
+    id: hvac_zone1_permanent_hold
+    name: "HVAC Zone 1 Permanent Hold"
+    icon: mdi:hand-back-right
+    lambda: |-
+      if (isnan(id(hvac_zones_holding_raw).state)) return {};
+      return (static_cast<uint8_t>(id(hvac_zones_holding_raw).state) & 0x01) != 0;
+    entity_category: diagnostic
+  - platform: template
+    id: hvac_zone1_timed_override
+    name: "HVAC Zone 1 Timed Override"
+    icon: mdi:timer
+    lambda: |-
+      if (isnan(id(hvac_timed_holds_raw).state)) return {};
+      return (static_cast<uint8_t>(id(hvac_timed_holds_raw).state) & 0x01) != 0;
+    entity_category: diagnostic
+
 text_sensor:
+  - platform: template
+    id: hvac_selected_mode
+    name: "HVAC Selected Mode"
+    icon: mdi:hvac
+    lambda: |-
+      if (isnan(id(m212063b02f33).state)) return {"UNKNOWN"};
+      switch (static_cast<int>(id(m212063b02f33).state)) {
+        case 0: return {"HEAT"};
+        case 1: return {"COOL"};
+        case 5: return {"OFF"};
+        default: return {"UNKNOWN"};
+      }
+  - platform: template
+    id: hvac_zone1_fan_mode
+    name: "HVAC Zone 1 Fan Mode"
+    icon: mdi:fan
+    lambda: |-
+      if (isnan(id(hvac_fan_mode_raw).state)) return {"UNKNOWN"};
+      switch (static_cast<int>(id(hvac_fan_mode_raw).state)) {
+        case 0: return {"AUTO"};
+        case 1: return {"LOW"};
+        case 2: return {"MED"};
+        case 3: return {"HIGH"}; // Expected sequence; not yet captured in 3B03.
+        default: return {"UNKNOWN"};
+      }
   - platform: template
     id: hvac_datetime
     name: HVAC Date and Time
@@ -235,9 +285,11 @@ bryant_parser:
       match: {dst: 0xF1, src: 0x20, function: 0x0C, register: 0x0203}
       payload_min: 6
     - name: thermostat_status
+      log: true
       match: {dst: 0x92, src: 0x20, function: 0x06, register: 0x3B02}
       payload_min: 26
     - name: thermostat_heat_setpoint
+      log: true
       match: {dst: 0x92, src: 0x20, function: 0x06, register: 0x3B03}
       payload_min: 43
     - name: heat_pump_stage
@@ -246,7 +298,8 @@ bryant_parser:
       payload_min: 4
   fields:
     - {name: indoor_temp, message: thermostat_status, sensor_id: m212063b02f14, offset: 6}
-    - {name: hvac_mode, message: thermostat_status, sensor_id: m212063b02f33, offset: 25}
+    # 3B02 data byte 22: HEAT=0, COOL=1, OFF=5 (AUTO not established).
+    - {name: selected_mode, message: thermostat_status, sensor_id: m212063b02f33, offset: 25}
     - {name: heat_setpoint, message: thermostat_heat_setpoint, sensor_id: m212063b03f23, offset: 15}
     - name: heat_pump_stage
       message: heat_pump_stage
@@ -268,8 +321,8 @@ bryant_parser:
     - {name: fan_speed, message: thermostat_heat_setpoint, sensor_id: hvac_fan_speed_raw, offset: 39}
     - {name: zones_holding, message: thermostat_heat_setpoint, sensor_id: hvac_zones_holding_raw, offset: 14}
     - {name: timed_holds, message: thermostat_heat_setpoint, sensor_id: hvac_timed_holds_raw, offset: 40}
-    # First byte of zone 1 hold duration (MSB).
-    - {name: hold_duration_high, message: thermostat_heat_setpoint, sensor_id: hvac_hold_duration_raw, offset: 41}
+    # 3B03 zone 1 remaining override minutes: BE uint16 at data offsets 38-39.
+    - {name: override_minutes, message: thermostat_heat_setpoint, sensor_id: hvac_hold_duration_raw, offset: 41, width: 16, endian: big}
     
 
 # Read-only date/time is published by bryant_parser to text_sensor.hvac_datetime.
