@@ -14,7 +14,7 @@ class TxListener {
   virtual ~TxListener() = default;
   virtual void on_tx_sent(const std::string &name, uint32_t ms) = 0;
 };
-class BryantWriter : public esphome::Component, public esphome::uart::UARTDevice {
+class BryantWriter : public esphome::Component, public esphome::uart::UARTDevice, public bryant_framer::FrameListener {
  public:
   void set_framer(bryant_framer::BryantFramer *framer) { framer_ = framer; }
   void set_idle_ms(uint32_t ms) { idle_ms_ = ms; }
@@ -26,6 +26,13 @@ class BryantWriter : public esphome::Component, public esphome::uart::UARTDevice
   bool enqueue_named_hex(const std::string &name, const std::string &hex);
   bool cancel(const std::string &name);
   bool enqueue_hex(const std::string &hex);  // manual diagnostic, full frame including CRC
+  void set_responder_enabled(bool v) { responder_enabled_ = v; }
+  void set_responder_register(uint16_t v) { responder_register_ = v; }
+  void set_responder_address(uint8_t v) { responder_address_ = v; }
+  void set_responder_window_ms(uint32_t v) { responder_window_ms_ = v; }
+  void arm_responder_window() { responder_armed_at_ = millis(); responder_armed_ = true; }
+  void disarm_responder_window() { responder_armed_ = false; responder_pending_ = false; }
+  void on_frame(const bryant_framer::FrameView &f) override;
   void setup() override;
   void loop() override;
   float get_setup_priority() const override { return esphome::setup_priority::DATA; }
@@ -57,6 +64,19 @@ class BryantWriter : public esphome::Component, public esphome::uart::UARTDevice
   uint32_t tx_backoff_ms_{0};
   bool log_tx_{true};
   TxListener *tx_listener_{nullptr};
+  bool responder_enabled_{false};
+  bool responder_armed_{false};
+  bool responder_pending_{false};
+  uint8_t responder_address_{0x92};
+  uint16_t responder_register_{0x3B0E};
+  uint32_t responder_window_ms_{5000};
+  uint32_t responder_armed_at_{0};
+  uint32_t responder_rx_ms_{0};
+  uint8_t responder_peer_{0x20};
+  uint8_t responder_peer_sub_{0x01};
+  uint8_t responder_local_sub_{0x01};
+  uint32_t responder_acks_{0};
+  uint32_t responder_expired_{0};
   static constexpr size_t MAX_QUEUE = 4;
 };
 }  // namespace bryant_writer

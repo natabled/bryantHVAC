@@ -4,7 +4,7 @@ esphome:
   friendly_name: Bryant HVAC
   project: 
     name: 'chatgpt.bryant-hvac'
-    version: '3.33'
+    version: '3.34'
   platformio_options:
     board_build.flash_mode: dio
 
@@ -39,7 +39,37 @@ syslog:
   udp_id: syslog_udp
   time_id: sntp_time
   port: 514
-  level: INFO
+  level: DEBUG
+select:
+  - platform: template
+    name: "Log Level (Global and Syslog)"
+    id: log_level_select
+    icon: mdi:bug
+    entity_category: diagnostic
+    optimistic: true
+    restore_value: false
+    options:
+      - "NONE"
+      - "ERROR"
+      - "WARN"
+      - "INFO"
+      - "DEBUG"
+    initial_option: "DEBUG"
+    set_action:
+      - lambda: |-
+          int level = ESPHOME_LOG_LEVEL_DEBUG;
+
+          if (x == "NONE") level = ESPHOME_LOG_LEVEL_NONE;
+          else if (x == "ERROR") level = ESPHOME_LOG_LEVEL_ERROR;
+          else if (x == "WARN") level = ESPHOME_LOG_LEVEL_WARN;
+          else if (x == "INFO") level = ESPHOME_LOG_LEVEL_INFO;
+          else if (x == "DEBUG") level = ESPHOME_LOG_LEVEL_DEBUG;
+          else if (x == "VERBOSE") level = ESPHOME_LOG_LEVEL_VERBOSE;
+          else if (x == "VERY_VERBOSE") level = ESPHOME_LOG_LEVEL_VERY_VERBOSE;
+
+          // Syslog has no public runtime setter; suppress messages at the source.
+          // Syslog forwarding remains capped by syslog.level: DEBUG.
+          id(logger).set_log_level(level);
 
 logger:
   level: DEBUG
@@ -61,7 +91,6 @@ external_components:
       type: git
       url: https://github.com/natabled/bryantHVAC
     components: [bryant_framer, bryant_parser, bryant_writer, bryant_set]
-    refresh: always
 
 uart:
   id: hvac_uart
@@ -336,6 +365,11 @@ bryant_writer:
   idle_ms: 50
   poll_interval: 50s
   log_tx: true
+  responder:
+    enabled: true
+    address: 0x92
+    register: 0x3B0E
+    window: 5s
   polls:
     - name: thermostat_status
       frame: "20 01 92 01 03 00 00 0B 00 3B 02 2D 7A"
@@ -429,6 +463,16 @@ switch:
     entity_category: config
 
 button:
+  - platform: template
+    name: HVAC Enable Zone 1 Hold
+    on_press:
+      - lambda: |-
+          id(hvac_set).set_hold(1, true);
+  - platform: template
+    name: HVAC Clear Zone 1 Hold
+    on_press:
+      - lambda: |-
+          id(hvac_set).set_hold(1, false);
   - platform: template
     name: Send Zone 1 Heat Setpoint
     on_press:

@@ -21,6 +21,12 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional("poll_interval", default="50s"): cv.positive_time_period_milliseconds,
     cv.Optional("polls", default=[]): cv.ensure_list(POLL),
     cv.Optional("log_tx", default=True): cv.boolean,
+    cv.Optional("responder", default={}): cv.Schema({
+        cv.Optional("enabled", default=False): cv.boolean,
+        cv.Optional("address", default=0x92): cv.int_range(min=0, max=255),
+        cv.Optional("register", default=0x3B0E): cv.int_range(min=0, max=65535),
+        cv.Optional("window", default="5s"): cv.positive_time_period_milliseconds,
+    }),
 }).extend(cv.COMPONENT_SCHEMA)
 
 async def to_code(config):
@@ -32,5 +38,10 @@ async def to_code(config):
     cg.add(var.set_idle_ms(config["idle_ms"]))
     cg.add(var.set_poll_interval_ms(config["poll_interval"].total_milliseconds))
     cg.add(var.set_log_tx(config["log_tx"]))
+    responder = config["responder"]
+    cg.add(var.set_responder_enabled(responder["enabled"]))
+    cg.add(var.set_responder_address(responder["address"]))
+    cg.add(var.set_responder_register(responder["register"]))
+    cg.add(var.set_responder_window_ms(responder["window"].total_milliseconds))
     for poll in config["polls"]:
         cg.add(var.add_poll(poll["name"], poll["frame"], poll["offset_ms"]))

@@ -73,6 +73,18 @@ bool BryantFramer::header_at_(size_t offset) const {
 }
 
 void BryantFramer::lose_sync_(const char *reason) {
+  if (synced_ && log_frame_errors_) {
+    char sample[16 * 3 + 1]{};
+    size_t used = 0;
+    const size_t n = std::min(count_, static_cast<size_t>(16));
+    for (size_t i = 0; i < n; ++i) {
+      const int w = snprintf(sample + used, sizeof(sample) - used,
+                             i ? " %02X" : "%02X", peek_(i));
+      if (w <= 0) break;
+      used += static_cast<size_t>(w);
+    }
+    ESP_LOGW(TAG, "Sync loss boundary sample (%u buffered): %s", static_cast<unsigned>(count_), sample);
+  }
   if (synced_) {
     synced_ = false;
     ++sync_restarts_;

@@ -54,7 +54,23 @@ void BryantWriter::add_poll(const std::string &name, const std::string &hex, uin
   p.valid = parse_hex_(hex, &p.frame) && validate_(p.frame);
   polls_.push_back(std::move(p));
 }
+void BryantWriter::on_frame(const bryant_framer::FrameView &f) {
+  if (!responder_enabled_ || !responder_armed_ ||
+      static_cast<uint32_t>(f.rcv_ms - responder_armed_at_) > responder_window_ms_) return;
+  if (f.dest != responder_address_ || f.function != 0x0C || f.payload == nullptr ||
+      f.length < 4 || f.payload[0] != 0x00 ||
+      ((static_cast<uint16_t>(f.payload[1]) << 8) | f.payload[2]) != responder_register_) return;
+  // A single high-priority response slot coalesces repeated notifications.
+  responder_peer_ = f.src;
+  responder_peer_sub_ = f.src_bus;
+  responder_local_sub_ = f.dest_bus;
+  responder_rx_ms_ = f.rcv_ms;
+  responder_pending_ = true;
+  ESP_LOGD(TAG, "Responder received WRITE %04X from %02X; ACK pending",
+           responder_register_, f.src);
+}
 void BryantWriter::setup() {
+  if (framer_ != nullptr) framer_->add_listener(this);
   const uint32_t now = millis();
   for (auto &p : polls_) {
     if (!p.valid) {
@@ -129,7 +145,11 @@ void BryantWriter::schedule_polls_(uint32_t now) {
 void BryantWriter::loop() {
   const uint32_t now = millis();
   schedule_polls_(now);
-  if (pending_frames_.empty() || framer_ == nullptr) return;
+  if (responder_armed_ && static_cast<uint32_t>(now - responder_armed_at_) > responder_window_ms_) {
+    responder_armed_ = false;
+    if (responder_pending_) { ++responder_expired_; responder_pending_ = false; }
+  }
+  if ((pending_frames_.empty() && !responder_pending_) || framer_ == nullptr) return;
   // Keep the UART framer as the sole RX consumer. If any bytes are buffered or
   // any frame is partially assembled, do not transmit.
   if (framer_->rx_pending() || this->available() > 0) {
@@ -137,19 +157,37 @@ void BryantWriter::loop() {
     return;
   }
   const uint32_t last_activity = framer_->last_rx_ms() > last_tx_ms_ ? framer_->last_rx_ms() : last_tx_ms_;
-  if (static_cast<uint32_t>(now - last_activity) < idle_ms_) {
+  const uint32_t required_idle = responder_pending_ ? 3U : idle_ms_;
+  if (static_cast<uint32_t>(now - last_activity) < required_idle) {
     quiet_started_ms_ = 0;
     return;
   }
   if (quiet_started_ms_ == 0) {
     quiet_started_ms_ = now;
-    tx_backoff_ms_ = 20U + (esp_random() % 101U);
+    tx_backoff_ms_ = responder_pending_ ? 0U : 20U + (esp_random() % 101U);
     return;
   }
   if (static_cast<uint32_t>(now - quiet_started_ms_) < tx_backoff_ms_) return;
   // Recheck just before TX. UART idle detection is NOT collision prevention.
   if (framer_->rx_pending() || this->available() > 0) {
     quiet_started_ms_ = 0;
+    return;
+  }
+  if (responder_pending_) {
+    const std::vector<uint8_t> ack_body{responder_peer_, responder_peer_sub_,
+        responder_address_, responder_local_sub_, 0x01, 0x00, 0x00, 0x06, 0x00};
+    std::vector<uint8_t> ack = ack_body;
+    const uint16_t crc = crc16_(ack.data(), ack.size());
+    ack.push_back(static_cast<uint8_t>(crc & 0xFF));
+    ack.push_back(static_cast<uint8_t>(crc >> 8));
+    this->write_array(ack.data(), ack.size());
+    this->flush();
+    last_tx_ms_ = millis();
+    ++responder_acks_;
+    responder_pending_ = false;
+    quiet_started_ms_ = 0;
+    ESP_LOGI(TAG, "Responder ACK %04X -> %02X count=%" PRIu32,
+             responder_register_, responder_peer_, responder_acks_);
     return;
   }
   const auto &next = pending_frames_.front();

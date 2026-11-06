@@ -9,6 +9,9 @@ static const char *const VERIFY = "set_verify_3b03";
 static constexpr uint8_t REG_LEN = 150;
 static constexpr uint8_t HEAT_OFFSET = 12;
 static constexpr uint8_t CHANGE_HEAT = 0x04;
+static constexpr uint8_t CHANGE_HOLD = 0x02;
+static constexpr uint8_t HOLD_OFFSET = 11;
+static constexpr uint8_t TIMED_OFFSET = 37;
 
 void BryantSet::setup() {
   if (framer_ != nullptr) framer_->add_listener(this);
@@ -27,6 +30,7 @@ void BryantSet::finish_(bool success, const char *reason) {
   }
   if (success) ++confirmed_count_; else ++failed_count_;
   state_ = State::IDLE;
+  if (writer_ != nullptr) writer_->disarm_responder_window();
   status_(reason);
 }
 bool BryantSet::queue_read_(const std::string &name) {
@@ -42,10 +46,22 @@ bool BryantSet::set_heat(uint8_t zone, uint8_t fahrenheit) {
   }
   zone_ = zone;
   target_ = fahrenheit;
+  operation_ = Operation::HEAT;
   started_ms_ = millis();
   if (!queue_read_(READ)) { status_("Failed: read queue rejected"); return false; }
   state_ = State::READ_QUEUED;
   status_("Requesting fresh 3B03");
+  return true;
+}
+bool BryantSet::set_hold(uint8_t zone, bool enabled) {
+  if (state_ != State::IDLE) { status_("Rejected: transaction busy"); return false; }
+  if (zone < 1 || zone > 8) { status_("Rejected: invalid zone"); return false; }
+  zone_ = zone;
+  operation_ = enabled ? Operation::HOLD_ON : Operation::HOLD_OFF;
+  started_ms_ = millis();
+  if (!queue_read_(READ)) { status_("Failed: read queue rejected"); return false; }
+  state_ = State::READ_QUEUED;
+  status_("Requesting fresh 3B03 before HOLD change");
   return true;
 }
 bool BryantSet::build_write_(const bryant_framer::FrameView &f) {
@@ -59,8 +75,14 @@ bool BryantSet::build_write_(const bryant_framer::FrameView &f) {
   // Register data bytes 0..2 are zone index, reserved, change flags.
   body[11] = static_cast<uint8_t>(zone_ - 1);
   body[12] = 0x00;
-  body[13] = CHANGE_HEAT;
-  body[11 + HEAT_OFFSET + zone_ - 1] = target_;
+  body[13] = operation_ == Operation::HEAT ? CHANGE_HEAT : CHANGE_HOLD;
+  if (operation_ == Operation::HEAT) {
+    body[11 + HEAT_OFFSET + zone_ - 1] = target_;
+  } else {
+    const uint8_t bit = static_cast<uint8_t>(1U << (zone_ - 1));
+    if (operation_ == Operation::HOLD_ON) body[11 + HOLD_OFFSET] |= bit;
+    else body[11 + HOLD_OFFSET] &= static_cast<uint8_t>(~bit);
+  }
   return writer_->enqueue_body(WRITE, body);
 }
 void BryantSet::on_tx_sent(const std::string &name, uint32_t ms) {
@@ -71,6 +93,7 @@ void BryantSet::on_tx_sent(const std::string &name, uint32_t ms) {
   } else if (name == WRITE && state_ == State::WRITE_QUEUED) {
     last_tx_ms_ = ms;
     ++sent_count_;
+    if (writer_ != nullptr) writer_->arm_responder_window();
     state_ = State::WAIT_WRITE;
     verify_due_ms_ = ms + verify_delay_ms_;
     status_("Write sent; awaiting verification poll");
@@ -88,17 +111,31 @@ void BryantSet::on_frame(const bryant_framer::FrameView &f) {
       f.payload[0] != 0x00 || f.payload[1] != 0x3B || f.payload[2] != 0x03) return;
   // The only authoritative responses are ones received after our own poll TX.
   if (state_ == State::WAIT_READ && static_cast<int32_t>(f.rcv_ms - last_tx_ms_) >= 0) {
+    const uint8_t bit = static_cast<uint8_t>(1U << (zone_ - 1));
+    initial_hold_ = (f.payload[3 + HOLD_OFFSET] & bit) != 0;
+    const uint8_t actual_heat = f.payload[3 + HEAT_OFFSET + zone_ - 1];
+    const bool already = operation_ == Operation::HEAT ? actual_heat == target_ :
+        operation_ == Operation::HOLD_ON ? (initial_hold_ && (f.payload[3 + TIMED_OFFSET] & bit) == 0) : !initial_hold_;
+    if (already) { finish_(true, "Already in requested state; no write"); return; }
     if (!build_write_(f)) { finish_(false, "Failed: write queue rejected"); return; }
     state_ = State::WRITE_QUEUED;
     status_("Fresh 3B03 received; write queued");
   } else if (state_ == State::WAIT_VERIFY &&
              static_cast<int32_t>(f.rcv_ms - verify_poll_ms_) >= 0) {
     const uint8_t actual = f.payload[3 + HEAT_OFFSET + zone_ - 1];
-    if (actual == target_) {
-      finish_(true, "Confirmed: thermostat reports requested heat setpoint");
+    const uint8_t bit = static_cast<uint8_t>(1U << (zone_ - 1));
+    const bool hold_now = (f.payload[3 + HOLD_OFFSET] & bit) != 0;
+    const bool timed_now = (f.payload[3 + TIMED_OFFSET] & bit) != 0;
+    const bool confirmed = operation_ == Operation::HEAT ?
+        (actual == target_ && (!initial_hold_ || (hold_now && !timed_now))) :
+        operation_ == Operation::HOLD_ON ? (hold_now && !timed_now) : !hold_now;
+    if (confirmed) {
+      finish_(true, operation_ == Operation::HEAT ? "Confirmed: heat setpoint and hold policy" :
+          operation_ == Operation::HOLD_ON ? "Confirmed: permanent HOLD enabled" : "Confirmed: HOLD cleared");
     } else {
-      ESP_LOGW(TAG, "Verification mismatch zone=%u requested=%u reported=%u",
-               static_cast<unsigned>(zone_), static_cast<unsigned>(target_), static_cast<unsigned>(actual));
+      ESP_LOGW(TAG, "Verification mismatch zone=%u op=%u target=%u heat=%u hold=%u timed=%u",
+               static_cast<unsigned>(zone_), static_cast<unsigned>(operation_),
+               static_cast<unsigned>(target_), static_cast<unsigned>(actual), hold_now, timed_now);
       // Re-read only, never retry the write.
       state_ = State::WAIT_WRITE;
       verify_due_ms_ = millis() + 2000;
@@ -110,7 +147,7 @@ void BryantSet::loop() {
   if (state_ == State::IDLE) return;
   const uint32_t now = millis();
   if (static_cast<uint32_t>(now - started_ms_) >= timeout_ms_) {
-    finish_(false, "FAILED: setpoint transaction timed out");
+    finish_(false, "FAILED: 3B03 transaction timed out");
     return;
   }
   if (state_ == State::WAIT_WRITE && static_cast<int32_t>(now - verify_due_ms_) >= 0) {
