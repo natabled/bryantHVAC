@@ -40,6 +40,7 @@ syslog:
   time_id: sntp_time
   port: 514
   level: DEBUG
+
 select:
   - platform: template
     name: "Log Level (Global and Syslog)"
@@ -58,7 +59,7 @@ select:
     set_action:
       - lambda: |-
           int level = ESPHOME_LOG_LEVEL_DEBUG;
-
+  
           if (x == "NONE") level = ESPHOME_LOG_LEVEL_NONE;
           else if (x == "ERROR") level = ESPHOME_LOG_LEVEL_ERROR;
           else if (x == "WARN") level = ESPHOME_LOG_LEVEL_WARN;
@@ -66,12 +67,13 @@ select:
           else if (x == "DEBUG") level = ESPHOME_LOG_LEVEL_DEBUG;
           else if (x == "VERBOSE") level = ESPHOME_LOG_LEVEL_VERBOSE;
           else if (x == "VERY_VERBOSE") level = ESPHOME_LOG_LEVEL_VERY_VERBOSE;
-
+  
           // Syslog has no public runtime setter; suppress messages at the source.
           // Syslog forwarding remains capped by syslog.level: DEBUG.
-          id(logger).set_log_level(level);
+          id(logger_hvac).set_log_level(level);
 
 logger:
+  id: logger_hvac
   level: DEBUG
   baud_rate: 0
 
@@ -91,6 +93,7 @@ external_components:
       type: git
       url: https://github.com/natabled/bryantHVAC
     components: [bryant_framer, bryant_parser, bryant_writer, bryant_set]
+    refresh: always
 
 uart:
   id: hvac_uart
