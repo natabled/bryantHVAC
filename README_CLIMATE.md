@@ -1,32 +1,42 @@
-# Bryant HVAC climate state machine — v3.36 test candidate
+# Bryant HVAC — Climate control policy
 
-## State ownership
-Thermostat selected HVAC mode (`3B02`): 0=HEAT, 1=COOL, 5=OFF. This is independent of Atom climate policy. The Atom does not have a verified command to write thermostat operating mode.
+The ESPHome climate entity presents a simple Home Assistant interface while leaving actual heating/cooling demand, staging, and safety decisions to the Bryant thermostat. **The ESP device's control mode is distinct from the thermostat's selected HVAC mode.** The observed thermostat mode is read from `3B02`: `0x00` = HEAT, `0x01` = COOL, `0x05` = OFF. Writing that mode is not implemented.
 
-| Climate display | Thermostat condition | Atom authority | Setpoint behavior |
+## Modes
+
+| Climate mode | Thermostat condition | ESP device behavior | Setpoint handling |
 |---|---|---|---|
-| OFF | Thermostat reports 0x05 | None | No writes |
-| AUTO | Thermostat reports 0x00/0x01 | Observer; no owned HOLD | If thermostat is in HEAT, target change sends `set_heat()` for default ~2h override; COOL target writing is not implemented |
-| HEAT | Thermostat reports 0x00 and Atom-owned permanent HOLD | Heat target control | `set_heat()` preserves HOLD |
-| COOL | Reserved, not activated | None yet | Requires verified cool setpoint transaction |
+| **OFF** | Thermostat reports `0x05` | Observe only; no thermostat-mode writes | No setpoint writes |
+| **AUTO** | Thermostat reports heat or cool | Observe thermostat; do not claim an existing manual HOLD | In thermostat HEAT, a heat-setpoint request can create the thermostat's default temporary override (observed ~2 hours). Cool override is not implemented |
+| **HEAT** | Thermostat selected HEAT and ESP-owned permanent HOLD | Maintain control of heat setpoint while HOLD remains present | `set_heat()` updates setpoint while preserving permanent HOLD |
+| **COOL** | Reserved | Not enabled until cool setpoint writing and validation are complete | Not implemented |
 
-## State transitions
-- Boot: Atom policy OFF, no ownership restored, no writes. After first valid `3B02`, OFF stays OFF for 0x05; 0x00/0x01 becomes AUTO. A pre-existing manual HOLD is never adopted.
-- AUTO -> HEAT: explicit HA command while thermostat selected HEAT. If no existing manual HOLD, send `set_hold(1,true)`, verify and claim ownership. Existing manual HOLD: fail closed to AUTO (no takeover).
-- HEAT -> AUTO: explicit HA command. Request `set_hold(1,false)` only if Atom owns the HOLD.
-- HEAT -> AUTO: if a subsequent read detects manual HOLD removal, timed override, or thermostat switched from HEAT, relinquish without reassertion.
-- AUTO + manual HOLD: remain AUTO. No adoption.
-- AUTO + temperature change: only if thermostat is in HEAT, `set_heat(1,target)` and thermostat normally creates its default temporary override (~120 min). No implicit HOLD. AUTO setpoint writes are blocked when manual HOLD is active or HOLD state unknown. COOL override unsupported.
-- Thermostat -> OFF (0x05): climate OFF; no claim that Atom switched the thermostat off.
-- HA -> OFF while thermostat in HEAT/COOL: rejected/logged; thermostat mode-write protocol has not been established. Do not pretend this request succeeded.
-- HA -> COOL: rejected/logged until a cool writer and mode policy are implemented.
+**AUTO** means *thermostat-managed*, not a claim that the thermostat is in an automatic heat/cool changeover mode. The thermostat alone decides whether equipment actually heats, runs the fan, or changes stages; `hvac_action` is not yet inferred from bus data.
 
-## Limits and test points
-- `bryant_set` has a verified heat/HOLD read-modify-write-verify engine; no verified cool writer or thermostat mode writer. No C++ changes in this package.
-- AUTO temporary override behavior is established from previous writes *without* permanent HOLD, but validate with an explicit HA climate AUTO setpoint test.
-- HOLD ownership is local volatile state, not proof of durable bus ownership. A manual HOLD appearing before Atom control remains manual.
-- `set_heat()` no-op optimization compares temperature only. If the thermostat is already at the requested temperature but a timed override was desired, it will not force a new override.
-- The 50-second polling interval determines detection latency. Transaction status is not a durable result API; verify failures in logs.
-- A pending HOLD is treated as owned when a matching HOLD state is observed, not by a unique transaction identifier. Improve the C++ transaction result API before unattended operation.
-- Climate `hvac_action` is intentionally not set; thermostat decides heating equipment operation.
-- YAML is structurally edited but not ESPHome compiled or hardware tested.
+## State transitions and ownership
+
+- **Startup:** Start with no ESP-owned HOLD and no restored control. After a valid thermostat-mode reading, show OFF if the thermostat is off, or AUTO if it is in heat/cool. Never silently adopt an existing manual HOLD.
+- **AUTO → HEAT:** Requires an explicit Home Assistant action (or automation), with the thermostat already in heating mode. Request permanent HOLD, then verify it. Do not take over a pre-existing manually selected HOLD.
+- **HEAT → AUTO:** On explicit release, clear HOLD only if this ESP session established it. Do not clear a HOLD owned by an operator.
+- **Manual HOLD removal:** If the thermostat leaves permanent HOLD while the ESP is in HEAT, relinquish control and return to AUTO; do **not** automatically reassert HOLD.
+- **Manual HOLD enabled in AUTO:** Remain in AUTO. An explicit mode change is still required to grant the ESP control.
+- **AUTO temporary override:** When the thermostat is heating and no manual permanent HOLD is active, a heat setpoint request uses `bryant_set.set_heat()`. The thermostat has been observed to create a default ~120-minute override. The duration is not explicitly written by this command. A separate `number.template` setpoint input can be used where Home Assistant hides the climate temperature slider in AUTO.
+- **Thermostat OFF:** Report OFF when `3B02` indicates `0x05`. Selecting OFF in Home Assistant cannot be assumed to turn the thermostat off; a verified thermostat-mode write is not available.
+- **COOL:** Control requests are reserved/rejected until the required writer and state policy have been verified.
+
+## Transaction behavior
+
+`bryant_set` uses a fresh `3B03` read before changes, skips writes when the requested state is already satisfied, and verifies a write by reading back. The heat-setpoint change flag is `0x04`; permanent HOLD changes use flag `0x02` and the zone 1 HOLD bit. The writer's `3B0E` acknowledgment responder is restricted to the configured register/address and a short window following a write; this is **not** a general-purpose reply to arbitrary bus traffic.
+
+HOLD ownership is volatile local state, not a durable identity recorded by the thermostat. A matching HOLD observation during a pending request is not cryptographic or transaction-ID proof of ownership. No automatic write retries are performed. A setpoint no-op will not force a fresh timed override if the requested temperature already matches.
+
+## Diagnostics and limitations
+
+- Polling of `3B02`/`3B03` determines how quickly manual thermostat changes are reflected in the climate entity (example interval: **50 seconds**).
+- Keep raw fields, framer synchronization counters, transaction status, and unverified equipment-stage indicators in Home Assistant diagnostics until validated.
+- Useful supplementary entities include thermostat-selected mode, indoor/outdoor temperature, humidity, HOLD/override state, and remaining override minutes. Actual fan operation, heating action, heat-pump stage, gas stage, and defrost should be added only after confirming their protocol mappings.
+- The current protocol work supports **heat setpoint and permanent HOLD**. Cool-setpoint writes and thermostat operating-mode writes are not verified or implemented.
+- Temporary override duration is thermostat-defined in the tested behavior. AUTO setpoint changes during a manual permanent HOLD should be blocked rather than silently changing the operator's HOLD.
+- A successful write/readback does not prove electrical bus reliability or universal compatibility. The responder and sync diagnostics remain experimental.
+
+See [README.md](README.md) for scope, testing limitations, references, and disclaimer.

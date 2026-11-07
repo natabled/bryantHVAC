@@ -4,7 +4,7 @@ esphome:
   friendly_name: HVAC
   project: 
     name: 'chatgpt.bryant-hvac'
-    version: '3.38'
+    version: '3.39'
   platformio_options:
     board_build.flash_mode: dio
 
@@ -20,7 +20,7 @@ api:
 
 ota:
   - platform: esphome
-    password: !secret hvac_atom_ota_password
+    encryption:
     
 # Wi-Fi settings
 wifi:
@@ -93,7 +93,7 @@ external_components:
       type: git
       url: https://github.com/natabled/bryantHVAC
     components: [bryant_framer, bryant_parser, bryant_writer, bryant_set]
-    refresh: 24h #always
+    refresh: always
     
 uart:
   id: hvac_uart
@@ -128,10 +128,24 @@ sensor:
       - lambda: return (x - 32.0f) * (5.0f / 9.0f);
   - platform: template
     id: m212063b02f14
-    name: Indoor Temperature
+    name: "Indoor Temperature"
     unit_of_measurement: "°F"
     device_class: temperature
     accuracy_decimals: 0
+  - platform: template
+    id: indoor_humidity
+    name: "Indoor Humidity"
+    unit_of_measurement: "%"
+    device_class: humidity
+    state_class: measurement
+    accuracy_decimals: 0
+  - platform: template
+    id: outdoor_temp
+    name: "Outdoor Temperature"
+    unit_of_measurement: "°F"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
   - platform: template
     id: m212063b02f33
     name: Mode Raw
@@ -148,7 +162,6 @@ sensor:
     name: Heat Pump State Raw
     accuracy_decimals: 0
     entity_category: diagnostic
-
   - platform: template
     id: hvac_hour
     name: Hour
@@ -179,45 +192,38 @@ sensor:
     name: Year
     internal: true
     accuracy_decimals: 0
-
   - platform: template
     id: hvac_cool_setpoint
     name: Cool Setpoint
     unit_of_measurement: "°F"
     device_class: temperature
     accuracy_decimals: 0
-
   - platform: template
     id: hvac_fan_mode_raw
     name: Fan Mode Raw
     accuracy_decimals: 0
     entity_category: diagnostic
-
   - platform: template
     id: hvac_fan_speed_raw
     name: Fan Speed Raw Unverified
     accuracy_decimals: 0
     entity_category: diagnostic
-
   - platform: template
     id: hvac_zones_holding_raw
     name: Hold Bitmask
     accuracy_decimals: 0
     entity_category: diagnostic
-
   - platform: template
     id: hvac_timed_holds_raw
     name: Timed Override Bitmask
     accuracy_decimals: 0
     entity_category: diagnostic
-
   - platform: template
     id: hvac_hold_duration_raw
     name: Override Minutes
     unit_of_measurement: min
     icon: mdi:timer-outline
     accuracy_decimals: 0
-
   - platform: debug
     free:
       name: Atom Free Heap
@@ -228,19 +234,16 @@ sensor:
   - platform: uptime
     name: Atom Uptime
     type: seconds
-
   - platform: template
     id: hvac_sync_restarts
     name: "Framer Sync Restarts"
     accuracy_decimals: 0
     entity_category: diagnostic
-
   - platform: template
     id: hvac_sync_acquisitions
     name: "Framer Sync Acquisitions"
     accuracy_decimals: 0
     entity_category: diagnostic
-
   - platform: template
     id: hvac_sync_state
     name: "Framer Synchronized"
@@ -256,7 +259,6 @@ binary_sensor:
       if (isnan(id(hvac_zones_holding_raw).state)) return {};
       return (static_cast<uint8_t>(id(hvac_zones_holding_raw).state) & 0x01) != 0;
     entity_category: diagnostic
-
   - platform: template
     id: hvac_zone1_timed_override
     name: "Timed Override"
@@ -333,8 +335,21 @@ bryant_parser:
       log: false
       match: {dst: 0x20, src: 0x50, function: 0x06, register: 0x3E02}
       payload_min: 4
+    - name: thermostat_broadcast_0420
+      log: true
+      match: {dst: 0xF1, src: 0x20, function: 0x0C, register: 0x0420}
+      payload_min: 22
   fields:
     - {name: indoor_temp, message: thermostat_status, sensor_id: m212063b02f14, offset: 6}
+    - {name: indoor_humidity, message: thermostat_broadcast_0420, sensor_id: indoor_humidity, offset: 13}
+    - name: outdoor_temp
+      message: thermostat_broadcast_0420
+      sensor_id: outdoor_temp
+      offset: 9
+      width: 16
+      endian: big
+      signed: true
+      multiplier: 0.0625
     # 3B02 data byte 22: HEAT=0, COOL=1, OFF=5 (AUTO not established).
     - {name: selected_mode, message: thermostat_status, sensor_id: m212063b02f33, offset: 25}
     - {name: heat_setpoint, message: thermostat_heat_setpoint, sensor_id: m212063b03f23, offset: 15}
