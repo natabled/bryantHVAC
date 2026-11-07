@@ -1,10 +1,10 @@
 # Bryant HVAC observer + manual raw UART diagnostic transmit
 esphome:
   name: bryant-hvac
-  friendly_name: Bryant HVAC
+  friendly_name: HVAC
   project: 
     name: 'chatgpt.bryant-hvac'
-    version: '3.34'
+    version: '3.35'
   platformio_options:
     board_build.flash_mode: dio
 
@@ -40,10 +40,9 @@ syslog:
   time_id: sntp_time
   port: 514
   level: DEBUG
-
 select:
   - platform: template
-    name: "Log Level (Global and Syslog)"
+    name: "Log Level"
     id: log_level_select
     icon: mdi:bug
     entity_category: diagnostic
@@ -59,7 +58,7 @@ select:
     set_action:
       - lambda: |-
           int level = ESPHOME_LOG_LEVEL_DEBUG;
-  
+
           if (x == "NONE") level = ESPHOME_LOG_LEVEL_NONE;
           else if (x == "ERROR") level = ESPHOME_LOG_LEVEL_ERROR;
           else if (x == "WARN") level = ESPHOME_LOG_LEVEL_WARN;
@@ -67,13 +66,12 @@ select:
           else if (x == "DEBUG") level = ESPHOME_LOG_LEVEL_DEBUG;
           else if (x == "VERBOSE") level = ESPHOME_LOG_LEVEL_VERBOSE;
           else if (x == "VERY_VERBOSE") level = ESPHOME_LOG_LEVEL_VERY_VERBOSE;
-  
+
           // Syslog has no public runtime setter; suppress messages at the source.
           // Syslog forwarding remains capped by syslog.level: DEBUG.
-          id(logger_hvac).set_log_level(level);
+          id(logger).set_log_level(level);
 
 logger:
-  id: logger_hvac
   level: DEBUG
   baud_rate: 0
 
@@ -90,10 +88,7 @@ time:
 
 external_components:
   - source:
-      type: git
-      url: https://github.com/natabled/bryantHVAC
     components: [bryant_framer, bryant_parser, bryant_writer, bryant_set]
-    refresh: always
 
 uart:
   id: hvac_uart
@@ -122,7 +117,7 @@ bryant_framer:
 sensor:
   - platform: copy
     source_id: m212063b02f14
-    id: hvac_indoor_c
+    id: indoor_temp_c
     internal: true
     filters:
       - lambda: return (x - 32.0f) * (5.0f / 9.0f);
@@ -134,84 +129,86 @@ sensor:
     accuracy_decimals: 0
   - platform: template
     id: m212063b02f33
-    name: HVAC Selected Mode Raw
+    name: Mode Raw
     accuracy_decimals: 0
     entity_category: diagnostic
   - platform: template
     id: m212063b03f23
-    name: HVAC Heat Setpoint
+    name: Heat Setpoint
     unit_of_measurement: "°F"
     device_class: temperature
     accuracy_decimals: 0
   - platform: template
     id: heat_pump_state
-    name: Heat Pump State
+    name: Heat Pump State Raw
     accuracy_decimals: 0
+    entity_category: diagnostic
+
   - platform: template
     id: hvac_hour
-    name: HVAC Hour
+    name: Hour
     internal: true
     accuracy_decimals: 0
   - platform: template
     id: hvac_minute
-    name: HVAC Minute
+    name: Minute
     internal: true
     accuracy_decimals: 0
   - platform: template
     id: hvac_second
-    name: HVAC Second
+    name: Second
     internal: true
     accuracy_decimals: 0
   - platform: template
     id: hvac_day
-    name: HVAC Day
+    name: Day
     internal: true
     accuracy_decimals: 0
   - platform: template
     id: hvac_month
-    name: HVAC Month
+    name: Month
     internal: true
     accuracy_decimals: 0
   - platform: template
     id: hvac_year
-    name: HVAC Year (2-digit)
+    name: Year
     internal: true
     accuracy_decimals: 0
 
   - platform: template
     id: hvac_cool_setpoint
-    name: HVAC Cool Setpoint
+    name: Cool Setpoint
     unit_of_measurement: "°F"
     device_class: temperature
     accuracy_decimals: 0
 
   - platform: template
     id: hvac_fan_mode_raw
-    name: HVAC Zone 1 Fan Mode Raw
+    name: Fan Mode Raw
     accuracy_decimals: 0
     entity_category: diagnostic
 
   - platform: template
     id: hvac_fan_speed_raw
-    name: HVAC Fan Speed Raw (Unverified)
+    name: Fan Speed Raw Unverified
     accuracy_decimals: 0
     entity_category: diagnostic
 
   - platform: template
     id: hvac_zones_holding_raw
-    name: HVAC Zone Holding Bitmask
+    name: Hold Bitmask
     accuracy_decimals: 0
     entity_category: diagnostic
 
   - platform: template
     id: hvac_timed_holds_raw
-    name: HVAC Timed Override Bitmask
+    name: Timed Override Bitmask
     accuracy_decimals: 0
     entity_category: diagnostic
 
   - platform: template
     id: hvac_hold_duration_raw
-    name: HVAC Zone 1 Override Remaining
+    name: Override Minutes
     unit_of_measurement: min
     icon: mdi:timer-outline
     accuracy_decimals: 0
@@ -229,26 +226,27 @@ sensor:
 
   - platform: template
     id: hvac_sync_restarts
-    name: "HVAC Framer Sync Restarts"
+    name: "Framer Sync Restarts"
     accuracy_decimals: 0
     entity_category: diagnostic
 
   - platform: template
     id: hvac_sync_acquisitions
-    name: "HVAC Framer Sync Acquisitions"
+    name: "Framer Sync Acquisitions"
     accuracy_decimals: 0
     entity_category: diagnostic
 
   - platform: template
     id: hvac_sync_state
-    name: "HVAC Framer Synchronized"
+    name: "Framer Synchronized"
     accuracy_decimals: 0
     entity_category: diagnostic
 
 binary_sensor:
   - platform: template
     id: hvac_zone1_permanent_hold
-    name: "HVAC Zone 1 Permanent Hold"
+    update_interval: 1s
+    name: "Permanent Hold"
     icon: mdi:hand-back-right
     lambda: |-
       if (isnan(id(hvac_zones_holding_raw).state)) return {};
@@ -256,7 +254,8 @@ binary_sensor:
     entity_category: diagnostic
   - platform: template
     id: hvac_zone1_timed_override
-    name: "HVAC Zone 1 Timed Override"
+    update_interval: 1s
+    name: "Timed Override"
     icon: mdi:timer
     lambda: |-
       if (isnan(id(hvac_timed_holds_raw).state)) return {};
@@ -266,7 +265,8 @@ binary_sensor:
 text_sensor:
   - platform: template
     id: hvac_selected_mode
-    name: "HVAC Selected Mode"
+    entity_category: diagnostic
+    name: "Thermostat Mode"
     icon: mdi:hvac
     lambda: |-
       if (isnan(id(m212063b02f33).state)) return {"UNKNOWN"};
@@ -278,7 +278,8 @@ text_sensor:
       }
   - platform: template
     id: hvac_zone1_fan_mode
-    name: "HVAC Zone 1 Fan Mode"
+    entity_category: diagnostic
+    name: "Fan Mode"
     icon: mdi:fan
     lambda: |-
       if (isnan(id(hvac_fan_mode_raw).state)) return {"UNKNOWN"};
@@ -291,11 +292,11 @@ text_sensor:
       }
   - platform: template
     id: hvac_datetime
-    name: HVAC Date and Time
+    name: Date and Time
     icon: mdi:calendar-clock
   - platform: template
     id: hvac_set_status
-    name: HVAC Setpoint Transaction Status
+    name: Set Transaction Status
     icon: mdi:check-circle-outline
   - platform: debug
     reset_reason:
@@ -396,7 +397,7 @@ bryant_set:
 number:
   - platform: template
     id: zone1_heat_request
-    name: Zone 1 Heat Request
+    name: Heat Test Request
     min_value: 50
     max_value: 90
     step: 1
@@ -405,43 +406,148 @@ number:
     initial_value: 66
     restore_value: false
 
-# Observational climate entity: frontend commands are ignored; nothing is sent.
+# Atom control policy (not the thermostat's own selected HVAC mode):
+# OFF = thermostat owns its program; HEAT = Atom owns a permanent HOLD.
+# No mode or setpoint restoration on boot.  The thermostat decides heat demand.
+globals:
+  - id: atom_heat_enabled
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: atom_hold_established
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: atom_hold_requested
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: atom_hold_requested_at
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+  - id: atom_release_requested
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: atom_target_pending
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: atom_target_f
+    type: int
+    restore_value: no
+    initial_value: '66'
+
 climate:
   - platform: template
     id: bryant_climate
-    name: Bryant HVAC
+    name: Bryant Climate
     sensor: hvac_indoor_c
-    supported_modes: ["OFF", HEAT, COOL, AUTO]
+    supported_modes: ["OFF", HEAT]
     optimistic: false
     restore_mode: NO_RESTORE
     visual:
-      min_temperature: 10 # 50F
-      max_temperature: 30 # 86F
-      temperature_step: 0.555 # 1F
-    on_control:
-      - logger.log: "Bryant climate is monitor-only; control ignored"
+      min_temperature: 10  # 50F
+      max_temperature: 30  # 86F
+      temperature_step: 0.5555556  # 1F
     initial_state:
       mode: "OFF"
+    on_control:
+      - lambda: |-
+          if (x.get_mode().has_value()) {
+            const auto mode = x.get_mode().value();
+            if (mode == climate::CLIMATE_MODE_HEAT && !id(atom_heat_enabled)) {
+              id(atom_heat_enabled) = true;
+              id(atom_hold_established) = false;
+              id(atom_hold_requested) = false;
+              id(atom_release_requested) = false;
+              ESP_LOGI("atom_climate", "HEAT selected: establish permanent HOLD");
+            } else if (mode == climate::CLIMATE_MODE_OFF && id(atom_heat_enabled)) {
+              id(atom_heat_enabled) = false;
+              // Release only a HOLD that this climate session established.
+              id(atom_release_requested) = id(atom_hold_established);
+              id(atom_hold_requested) = false;
+              id(atom_target_pending) = false;
+              ESP_LOGI("atom_climate", "OFF selected: thermostat schedule resumes");
+            }
+          }
+          if (x.get_target_temperature().has_value()) {
+            const float c = x.get_target_temperature().value();
+            const int f = static_cast<int>(lroundf(c * 9.0f / 5.0f + 32.0f));
+            if (f >= 50 && f <= 86 && id(atom_heat_enabled)) {
+              id(atom_target_f) = f;
+              id(atom_target_pending) = true;
+              ESP_LOGI("atom_climate", "Queued heat setpoint %dF", f);
+            }
+          }
 
-# Read-only climate state reflects the parsed target.
-# Avoid assigning a heating/cooling action until raw mode codes are confirmed.
+# Reconciliation is event-driven by the current parsed HOLD state, and gated
+# by bryant_set's transaction-busy flag. No blind write/retry loop.
 interval:
   - interval: 5s
     then:
-      - if:
-          condition:
-            lambda: 'return !isnan(id(m212063b03f23).state);'
-          then:
-            - climate.template.publish:
-                id: bryant_climate
-                target_temperature: !lambda 'return (id(m212063b03f23).state - 32.0f) * (5.0f / 9.0f);'
+      - lambda: |-
+          const bool have_hold = !isnan(id(hvac_zones_holding_raw).state);
+          const bool hold = have_hold &&
+              ((static_cast<uint8_t>(id(hvac_zones_holding_raw).state) & 0x01) != 0);
+          const bool timed = !isnan(id(hvac_timed_holds_raw).state) &&
+              ((static_cast<uint8_t>(id(hvac_timed_holds_raw).state) & 0x01) != 0);
+          const bool busy = id(hvac_set).is_busy();
+
+          if (id(atom_heat_enabled)) {
+            if (id(atom_hold_established) && have_hold && (!hold || timed) && !busy) {
+              ESP_LOGW("atom_climate", "Thermostat HOLD removed/changed; relinquishing Atom control");
+              id(atom_heat_enabled) = false;
+              id(atom_hold_established) = false;
+              id(atom_hold_requested) = false;
+              id(atom_target_pending) = false;
+              id(atom_release_requested) = false;  // Operator owns this change.
+            } else if (have_hold && hold && !timed && !busy) {
+              id(atom_hold_established) = true;
+              id(atom_hold_requested) = false;
+              if (id(atom_target_pending)) {
+                if (id(hvac_set).set_heat(1, static_cast<uint8_t>(id(atom_target_f)))) {
+                  id(atom_target_pending) = false;  // No automatic retries on failure.
+                }
+              }
+            } else if (!id(atom_hold_requested) && have_hold && !busy) {
+              if (id(hvac_set).set_hold(1, true)) {
+                id(atom_hold_requested) = true;
+                id(atom_hold_requested_at) = millis();
+              }
+            } else if (id(atom_hold_requested) && !busy &&
+                       (uint32_t)(millis() - id(atom_hold_requested_at)) > 20000 &&
+                       !id(atom_hold_established)) {
+              ESP_LOGW("atom_climate", "HOLD not confirmed; reverting to OFF (no retry)");
+              id(atom_heat_enabled) = false;
+              id(atom_hold_requested) = false;
+              id(atom_target_pending) = false;
+            }
+          } else if (id(atom_release_requested) && !busy && have_hold) {
+            if (hold) {
+              if (id(hvac_set).set_hold(1, false)) id(atom_release_requested) = false;
+            } else {
+              id(atom_release_requested) = false;
+            }
+            id(atom_hold_established) = false;
+          }
+
+      - climate.template.publish:
+          id: bryant_climate
+          mode: !lambda |-
+            return id(atom_heat_enabled) ? climate::CLIMATE_MODE_HEAT : climate::CLIMATE_MODE_OFF;
+          target_temperature: !lambda |-
+            const float f = (id(atom_target_pending) && id(atom_heat_enabled)) ?
+                static_cast<float>(id(atom_target_f)) : id(m212063b03f23).state;
+            return isnan(f) ? NAN : (f - 32.0f) * 5.0f / 9.0f;
 
 # Manual raw-hex diagnostic transmission (CRC and length verified by writer).
 # Disabled by default; turn on the switch deliberately before pressing the button.
 text:
   - platform: template
     id: hvac_tx_hex
-    name: HVAC Raw TX Hex
+    name: Raw TX Hex
     mode: text
     optimistic: true
     max_length: 250
@@ -460,29 +566,29 @@ text:
 switch:
   - platform: template
     id: hvac_tx_enabled
-    name: HVAC Manual TX Enabled
+    name: Manual TX Enabled
     optimistic: true
     restore_mode: ALWAYS_OFF
     entity_category: config
 
 button:
   - platform: template
-    name: HVAC Enable Zone 1 Hold
+    name: Hold Set
     on_press:
       - lambda: |-
           id(hvac_set).set_hold(1, true);
   - platform: template
-    name: HVAC Clear Zone 1 Hold
+    name: Hold Clear
     on_press:
       - lambda: |-
           id(hvac_set).set_hold(1, false);
   - platform: template
-    name: Send Zone 1 Heat Setpoint
+    name: Heat Test Send
     on_press:
       - lambda: |-
           id(hvac_set).set_heat(1, static_cast<uint8_t>(id(zone1_heat_request).state));
   - platform: template
-    name: HVAC Send Raw Frame
+    name: Raw TX Send
     on_press:
       - lambda: |-
           if (!id(hvac_tx_enabled).state) {

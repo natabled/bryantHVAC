@@ -20,6 +20,7 @@ class BryantSet : public esphome::Component, public bryant_framer::FrameListener
   void set_sam_address(uint8_t v) { sam_ = v; }
   bool set_heat(uint8_t zone, uint8_t fahrenheit);
   bool set_hold(uint8_t zone, bool enabled);
+  bool is_busy() const { return state_ != State::IDLE; }
   void setup() override;
   void loop() override;
   void on_frame(const bryant_framer::FrameView &f) override;
