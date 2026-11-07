@@ -4,7 +4,7 @@ esphome:
   friendly_name: HVAC
   project: 
     name: 'chatgpt.bryant-hvac'
-    version: '3.35'
+    version: '3.36'
   platformio_options:
     board_build.flash_mode: dio
 
@@ -40,6 +40,7 @@ syslog:
   time_id: sntp_time
   port: 514
   level: DEBUG
+  
 select:
   - platform: template
     name: "Log Level"
@@ -409,19 +410,22 @@ number:
     initial_value: 66
     restore_value: false
 
-# Atom control policy (not the thermostat's own selected HVAC mode):
-# OFF = thermostat owns its program; HEAT = Atom owns a permanent HOLD.
-# No mode or setpoint restoration on boot.  The thermostat decides heat demand.
+# Atom climate policy is separate from the thermostat's selected HVAC mode.
+# OFF = thermostat reports mode 0x05 (not an Atom command).
+# AUTO = thermostat in HEAT/COOL; Atom observes and can request a temporary heat override.
+# HEAT = Atom owns a permanent HOLD while thermostat is selected HEAT.
+# COOL = reserved: no verified cool-setpoint writer yet; requests fall back to AUTO.
+# Never restore Atom ownership on reboot or adopt a manual HOLD.
 globals:
-  - id: atom_heat_enabled
+  - id: atom_policy
+    type: int
+    restore_value: no
+    initial_value: '0'  # 0 OFF, 1 AUTO, 2 HEAT; COOL reserved
+  - id: atom_owned_hold
     type: bool
     restore_value: no
     initial_value: 'false'
-  - id: atom_hold_established
-    type: bool
-    restore_value: no
-    initial_value: 'false'
-  - id: atom_hold_requested
+  - id: atom_hold_pending
     type: bool
     restore_value: no
     initial_value: 'false'
@@ -429,7 +433,7 @@ globals:
     type: uint32_t
     restore_value: no
     initial_value: '0'
-  - id: atom_release_requested
+  - id: atom_release_pending
     type: bool
     restore_value: no
     initial_value: 'false'
@@ -441,108 +445,168 @@ globals:
     type: int
     restore_value: no
     initial_value: '66'
+  - id: atom_last_hold_update
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+  - id: atom_last_hold_seen
+    type: bool
+    restore_value: no
+    initial_value: 'false'
 
 climate:
   - platform: template
     id: bryant_climate
     name: Bryant Climate
     sensor: indoor_temp_c
-    supported_modes: ["OFF", HEAT]
+    supported_modes: ["OFF", AUTO, HEAT, COOL]
     optimistic: false
     restore_mode: NO_RESTORE
     visual:
       min_temperature: 10  # 50F
       max_temperature: 30  # 86F
-      temperature_step: 0.5555556  # 1F
+      temperature_step: 1
     initial_state:
       mode: "OFF"
     on_control:
       - lambda: |-
+          const float raw = id(m212063b02f33).state;
+          const int thermostat_mode = isnan(raw) ? -1 : static_cast<int>(raw);
           if (x.get_mode().has_value()) {
-            const auto mode = x.get_mode().value();
-            if (mode == climate::CLIMATE_MODE_HEAT && !id(atom_heat_enabled)) {
-              id(atom_heat_enabled) = true;
-              id(atom_hold_established) = false;
-              id(atom_hold_requested) = false;
-              id(atom_release_requested) = false;
-              ESP_LOGI("atom_climate", "HEAT selected: establish permanent HOLD");
-            } else if (mode == climate::CLIMATE_MODE_OFF && id(atom_heat_enabled)) {
-              id(atom_heat_enabled) = false;
-              // Release only a HOLD that this climate session established.
-              id(atom_release_requested) = id(atom_hold_established);
-              id(atom_hold_requested) = false;
-              id(atom_target_pending) = false;
-              ESP_LOGI("atom_climate", "OFF selected: thermostat schedule resumes");
+            const auto requested = x.get_mode().value();
+            if (requested == climate::CLIMATE_MODE_HEAT) {
+              if (thermostat_mode != 0) {
+                ESP_LOGW("atom_climate", "HEAT requires thermostat selected HEAT; no thermostat mode-write implemented");
+              } else if (id(atom_policy) != 2) {
+                id(atom_policy) = 2;
+                id(atom_hold_pending) = false;
+                id(atom_target_pending) = false;
+                // A pre-existing manual HOLD remains manual; only our transaction can establish ownership.
+                ESP_LOGI("atom_climate", "HEAT selected: request Atom-owned HOLD");
+              }
+            } else if (requested == climate::CLIMATE_MODE_AUTO) {
+              if (thermostat_mode == 0 || thermostat_mode == 1) {
+                if (id(atom_policy) == 2 && id(atom_owned_hold)) id(atom_release_pending) = true;
+                id(atom_policy) = 1;
+                id(atom_hold_pending) = false;
+                id(atom_target_pending) = false;
+                ESP_LOGI("atom_climate", "AUTO selected: observing thermostat");
+              } else {
+                ESP_LOGW("atom_climate", "AUTO requires thermostat HEAT or COOL");
+              }
+            } else if (requested == climate::CLIMATE_MODE_OFF) {
+              // Mode 0x05 is a physical thermostat setting, NOT an Atom-control disable.
+              // No verified 3B02 mode-write exists. Never claim to turn the thermostat off.
+              ESP_LOGW("atom_climate", "OFF requires thermostat mode 0x05; mode writing not implemented");
+            } else if (requested == climate::CLIMATE_MODE_COOL) {
+              ESP_LOGW("atom_climate", "COOL reserved: cool setpoint write not implemented");
             }
           }
           if (x.get_target_temperature().has_value()) {
-            const float c = x.get_target_temperature().value();
-            const int f = static_cast<int>(lroundf(c * 9.0f / 5.0f + 32.0f));
-            if (f >= 50 && f <= 86 && id(atom_heat_enabled)) {
+            const int f = static_cast<int>(lroundf(x.get_target_temperature().value() * 9.0f / 5.0f + 32.0f));
+            if (f >= 50 && f <= 86 && thermostat_mode == 0 &&
+                (id(atom_policy) == 1 || id(atom_policy) == 2) &&
+                !(id(atom_policy) == 1 &&
+                  (isnan(id(hvac_zones_holding_raw).state) ||
+                   (static_cast<uint8_t>(id(hvac_zones_holding_raw).state) & 1)))) {
+              // In AUTO, set_heat() while not on permanent HOLD produces the thermostat's
+              // default temporary override (observed ~120 minutes). In HEAT it preserves HOLD.
               id(atom_target_f) = f;
               id(atom_target_pending) = true;
-              ESP_LOGI("atom_climate", "Queued heat setpoint %dF", f);
+              ESP_LOGI("atom_climate", "Queued %s heat target %dF", id(atom_policy) == 1 ? "AUTO override" : "HOLD", f);
+            } else {
+              ESP_LOGW("atom_climate", "Setpoint rejected: only HEAT-selected thermostat supported by writer");
             }
           }
 
-# Reconciliation is event-driven by the current parsed HOLD state, and gated
-# by bryant_set's transaction-busy flag. No blind write/retry loop.
+# Reconcile from *fresh* parser values, not merely a 5s timer. No write retries.
+# Polls of 3B02/3B03 remain 50s; changing the manual HOLD may take one poll to appear.
 interval:
   - interval: 5s
     then:
       - lambda: |-
+          const float mode_raw = id(m212063b02f33).state;
+          const int tmode = isnan(mode_raw) ? -1 : static_cast<int>(mode_raw);
           const bool have_hold = !isnan(id(hvac_zones_holding_raw).state);
-          const bool hold = have_hold &&
-              ((static_cast<uint8_t>(id(hvac_zones_holding_raw).state) & 0x01) != 0);
+          const bool hold = have_hold && ((static_cast<uint8_t>(id(hvac_zones_holding_raw).state) & 1) != 0);
           const bool timed = !isnan(id(hvac_timed_holds_raw).state) &&
-              ((static_cast<uint8_t>(id(hvac_timed_holds_raw).state) & 0x01) != 0);
+              ((static_cast<uint8_t>(id(hvac_timed_holds_raw).state) & 1) != 0);
           const bool busy = id(hvac_set).is_busy();
-
-          if (id(atom_heat_enabled)) {
-            if (id(atom_hold_established) && have_hold && (!hold || timed) && !busy) {
-              ESP_LOGW("atom_climate", "Thermostat HOLD removed/changed; relinquishing Atom control");
-              id(atom_heat_enabled) = false;
-              id(atom_hold_established) = false;
-              id(atom_hold_requested) = false;
+          // Startup/observation: OFF if thermostat OFF; AUTO if HEAT or COOL.
+          // Unknown mode never implies permission to write.
+          if (tmode == 5) {
+            if (id(atom_policy) == 2) {
+              ESP_LOGW("atom_climate", "Thermostat turned OFF; Atom relinquishing control");
+              id(atom_owned_hold) = false;
+              id(atom_hold_pending) = false;
               id(atom_target_pending) = false;
-              id(atom_release_requested) = false;  // Operator owns this change.
-            } else if (have_hold && hold && !timed && !busy) {
-              id(atom_hold_established) = true;
-              id(atom_hold_requested) = false;
-              if (id(atom_target_pending)) {
-                if (id(hvac_set).set_heat(1, static_cast<uint8_t>(id(atom_target_f)))) {
-                  id(atom_target_pending) = false;  // No automatic retries on failure.
-                }
+              id(atom_release_pending) = false;
+            }
+            id(atom_policy) = 0;
+          } else if (tmode == 0 || tmode == 1) {
+            if (id(atom_policy) == 0) id(atom_policy) = 1;
+            if (id(atom_policy) == 2 && tmode != 0) {
+              ESP_LOGW("atom_climate", "Thermostat left HEAT; Atom relinquishing control");
+              id(atom_policy) = 1;
+              id(atom_owned_hold) = false;
+              id(atom_hold_pending) = false;
+              id(atom_target_pending) = false;
+              id(atom_release_pending) = false;
+            }
+          }
+          if (id(atom_policy) == 2 && tmode == 0 && have_hold && !busy) {
+            if (id(atom_owned_hold) && (!hold || timed)) {
+              ESP_LOGW("atom_climate", "Operator removed/changed Atom HOLD; returning to AUTO");
+              id(atom_policy) = 1;
+              id(atom_owned_hold) = false;
+              id(atom_hold_pending) = false;
+              id(atom_target_pending) = false;
+            } else if (id(atom_hold_pending)) {
+              if (hold && !timed) {
+                id(atom_owned_hold) = true;
+                id(atom_hold_pending) = false;
+                ESP_LOGI("atom_climate", "Atom HOLD confirmed");
+              } else if ((uint32_t)(millis() - id(atom_hold_requested_at)) > 20000) {
+                ESP_LOGW("atom_climate", "HOLD not confirmed; returning to AUTO");
+                id(atom_policy) = 1;
+                id(atom_hold_pending) = false;
+                id(atom_target_pending) = false;
               }
-            } else if (!id(atom_hold_requested) && have_hold && !busy) {
-              if (id(hvac_set).set_hold(1, true)) {
-                id(atom_hold_requested) = true;
+            } else if (!id(atom_owned_hold)) {
+              if (hold && !timed) {
+                // Do not silently adopt an operator's pre-existing manual HOLD.
+                ESP_LOGW("atom_climate", "Manual HOLD already active; Atom ownership not established; returning to AUTO");
+                id(atom_policy) = 1;
+                id(atom_target_pending) = false;
+              } else if (id(hvac_set).set_hold(1, true)) {
+                id(atom_hold_pending) = true;
                 id(atom_hold_requested_at) = millis();
               }
-            } else if (id(atom_hold_requested) && !busy &&
-                       (uint32_t)(millis() - id(atom_hold_requested_at)) > 20000 &&
-                       !id(atom_hold_established)) {
-              ESP_LOGW("atom_climate", "HOLD not confirmed; reverting to OFF (no retry)");
-              id(atom_heat_enabled) = false;
-              id(atom_hold_requested) = false;
+            }
+          }
+          if (id(atom_release_pending) && !busy && have_hold) {
+            if (hold && id(atom_owned_hold)) {
+              if (id(hvac_set).set_hold(1, false)) id(atom_release_pending) = false;
+            } else id(atom_release_pending) = false;
+            id(atom_owned_hold) = false;
+          }
+          if (id(atom_target_pending) && !busy && tmode == 0 &&
+              (id(atom_policy) == 1 || (id(atom_policy) == 2 && id(atom_owned_hold))) &&
+              !(id(atom_policy) == 1 && (!have_hold || hold))) {
+            if (id(hvac_set).set_heat(1, static_cast<uint8_t>(id(atom_target_f)))) {
               id(atom_target_pending) = false;
             }
-          } else if (id(atom_release_requested) && !busy && have_hold) {
-            if (hold) {
-              if (id(hvac_set).set_hold(1, false)) id(atom_release_requested) = false;
-            } else {
-              id(atom_release_requested) = false;
-            }
-            id(atom_hold_established) = false;
           }
-
       - climate.template.publish:
           id: bryant_climate
           mode: !lambda |-
-            return id(atom_heat_enabled) ? climate::CLIMATE_MODE_HEAT : climate::CLIMATE_MODE_OFF;
+            switch (id(atom_policy)) {
+              case 2: return climate::CLIMATE_MODE_HEAT;
+              case 1: return climate::CLIMATE_MODE_AUTO;
+              default: return climate::CLIMATE_MODE_OFF;
+            }
           target_temperature: !lambda |-
-            const float f = (id(atom_target_pending) && id(atom_heat_enabled)) ?
-                static_cast<float>(id(atom_target_f)) : id(m212063b03f23).state;
+            const float f = id(m212063b03f23).state;
             return isnan(f) ? NAN : (f - 32.0f) * 5.0f / 9.0f;
 
 # Manual raw-hex diagnostic transmission (CRC and length verified by writer).
