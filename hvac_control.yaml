@@ -4,7 +4,7 @@ esphome:
   friendly_name: HVAC
   project: 
     name: 'chatgpt.bryant-hvac'
-    version: '3.40'
+    version: '3.41'
   platformio_options:
     board_build.flash_mode: dio
 
@@ -249,7 +249,28 @@ sensor:
     name: "Framer Synchronized"
     accuracy_decimals: 0
     entity_category: diagnostic
-
+    
+  - platform: template
+    id: hvac_ahu_rpm_raw
+    name: "ahu rpm raw"
+    accuracy_decimals: 0
+    entity_category: diagnostic
+  - platform: template
+    id: hvac_ahu_flags_raw
+    name: "ahu flags raw"
+    accuracy_decimals: 0
+    entity_category: diagnostic
+  - platform: template
+    id: hvac_ahu_bit3_raw
+    name: "ahu bit3 raw"
+    accuracy_decimals: 0
+    entity_category: diagnostic
+  - platform: template
+    id: hvac_ahu_value_2_raw
+    name: "ahu value2 raw"
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    
 binary_sensor:
   - platform: template
     id: hvac_zone1_permanent_hold
@@ -331,7 +352,7 @@ bryant_parser:
       log: true
       match: {dst: 0x92, src: 0x20, function: 0x06, register: 0x3B03}
       payload_min: 43
-    - name: heat_pump_stage
+    - name: heat_pump_status_3e02
       log: false
       match: {dst: 0x20, src: 0x50, function: 0x06, register: 0x3E02}
       payload_min: 4
@@ -339,6 +360,18 @@ bryant_parser:
       log: true
       match: {dst: 0xF1, src: 0x20, function: 0x0C, register: 0x0420}
       payload_min: 22
+    - name: furnace_status_0306
+      log: true
+      match: {dst: 0x20, src: 0x40, function: 0x06, register: 0x0306}
+      payload_min: 13
+    - name: furnace_status_0316
+      log: true
+      match: {dst: 0x20, src: 0x40, function: 0x06, register: 0x0316}
+      payload_min: 17
+    - name: heat_pump_status_3e01
+      log: true
+      match: {dst: 0x20, src: 0x50, function: 0x06, register: 0x3E01}
+      payload_min: 16
   fields:
     - {name: indoor_temp, message: thermostat_status, sensor_id: m212063b02f14, offset: 6}
     - {name: indoor_humidity, message: thermostat_broadcast_0420, sensor_id: indoor_humidity, offset: 13}
@@ -354,7 +387,7 @@ bryant_parser:
     - {name: selected_mode, message: thermostat_status, sensor_id: m212063b02f33, offset: 25}
     - {name: heat_setpoint, message: thermostat_heat_setpoint, sensor_id: m212063b03f23, offset: 15}
     - name: heat_pump_stage
-      message: heat_pump_stage
+      message: heat_pump_status_3e02
       sensor_id: heat_pump_state
       offset: 3
       bit_rules:
@@ -375,7 +408,31 @@ bryant_parser:
     - {name: timed_holds, message: thermostat_heat_setpoint, sensor_id: hvac_timed_holds_raw, offset: 40}
     # 3B03 zone 1 remaining override minutes: BE uint16 at data offsets 38-39.
     - {name: override_minutes, message: thermostat_heat_setpoint, sensor_id: hvac_hold_duration_raw, offset: 41, width: 16, endian: big}
-    
+    - name: furnace_blower_rpm_candidate
+      message: furnace_status_0306
+      sensor_id: hvac_ahu_rpm_raw
+      offset: 4
+      width: 16
+      endian: big
+  
+    - name: furnace_0306_value_2
+      message: furnace_status_0306
+      sensor_id: hvac_ahu_value_2_raw
+      offset: 6
+      width: 16
+      endian: big
+  
+    - name: furnace_0306_flags
+      message: furnace_status_0306
+      sensor_id: hvac_ahu_flags_raw
+      offset: 12
+  
+    - name: furnace_0306_bit3
+      message: furnace_status_0306
+      sensor_id: hvac_ahu_bit3_raw
+      offset: 12
+      mask: 0x08
+      shift: 3
 
 # Read-only date/time is published by bryant_parser to text_sensor.hvac_datetime.
 # Native datetime template with lambda is not used because it expects a writable
