@@ -4,7 +4,7 @@ esphome:
   friendly_name: HVAC
   project: 
     name: 'chatgpt.bryant-hvac'
-    version: '3.44'
+    version: '3.50'
   platformio_options:
     board_build.flash_mode: dio
 
@@ -122,129 +122,134 @@ bryant_framer:
 sensor:
   # ── THERMOSTAT · environmental and setpoint ──
   - platform: template
-    id: m212063b02f14
-    name: "Indoor Temperature"
+    id: tstat_indoor_temp
+    name: "Tstat Indoor Temp"
     unit_of_measurement: "°F"
     device_class: temperature
     accuracy_decimals: 0
   - platform: copy
-    source_id: m212063b02f14
-    id: indoor_temp_c
+    source_id: tstat_indoor_temp
+    id: tstat_indoor_temp_c
     internal: true
     filters:
       - lambda: return (x - 32.0f) * (5.0f / 9.0f);
   - platform: template
-    id: indoor_humidity
-    name: "Indoor Humidity"
+    id: tstat_indoor_humidity
+    name: "Tstat Indoor Humidity"
     unit_of_measurement: "%"
     device_class: humidity
     state_class: measurement
     accuracy_decimals: 0
   - platform: template
-    id: outdoor_temp
-    name: "Outdoor Temperature"
+    id: tstat_outdoor_temp
+    name: "Tstat Outdoor Temp"
     unit_of_measurement: "°F"
     device_class: temperature
     state_class: measurement
     accuracy_decimals: 1
   - platform: template
-    id: m212063b03f23
-    name: Heat Setpoint
+    id: tstat_heat_setpoint
+    name: "Tstat Heat Setpoint"
     unit_of_measurement: "°F"
     device_class: temperature
     accuracy_decimals: 0
   - platform: template
-    id: hvac_cool_setpoint
-    name: Cool Setpoint
+    id: tstat_cool_setpoint
+    name: "Tstat Cool Setpoint"
     unit_of_measurement: "°F"
     device_class: temperature
     accuracy_decimals: 0
   - platform: template
-    id: hvac_thermostat_mode
-    name: "Thermostat Mode Raw"
+    id: tstat_demand_raw
+    name: "Tstat Demand Raw"
     accuracy_decimals: 0
     entity_category: diagnostic
   - platform: template
-    id: hvac_fan_mode_raw
-    name: Fan Mode Raw
+    id: tstat_fan_mode_raw
+    name: "Tstat Fan Mode Raw"
     accuracy_decimals: 0
     entity_category: diagnostic
   - platform: template
-    id: hvac_fan_speed_raw
-    name: Fan Speed Raw Unverified
+    id: tstat_fan_speed_raw
+    name: "Tstat Fan Speed Raw"
     accuracy_decimals: 0
     entity_category: diagnostic
   - platform: template
-    id: hvac_zones_holding_raw
-    name: Hold Bitmask
+    id: tstat_hold_mask_raw
+    name: "Tstat Hold Mask Raw"
     accuracy_decimals: 0
     entity_category: diagnostic
   - platform: template
-    id: hvac_timed_holds_raw
-    name: Timed Override Bitmask
+    id: tstat_timed_hold_mask_raw
+    name: "Tstat Timed Hold Mask Raw"
     accuracy_decimals: 0
     entity_category: diagnostic
   - platform: template
-    id: hvac_hold_duration_raw
-    name: Override Minutes
+    id: tstat_hold_minutes
+    name: "Tstat Hold Minutes"
     unit_of_measurement: min
     icon: mdi:timer-outline
     accuracy_decimals: 0
 
   # ── FURNACE · stage and status ──
   - platform: template
-    id: hvac_furnace_sequence_raw
-    name: "furnace sequence raw"
+    id: furnace_stage_requested
+    name: "Furnace Stage Requested"
     accuracy_decimals: 0
     entity_category: diagnostic
   - platform: template
-    id: hvac_furnace_flags_raw
-    name: "furnace flags raw"
+    id: furnace_stage_reported
+    name: "Furnace Stage Reported"
+    accuracy_decimals: 0
+    entity_category: diagnostic
+  - platform: template
+    id: furnace_status_raw
+    name: "Furnace Status Raw"
     accuracy_decimals: 0
     entity_category: diagnostic
 
   # ── AIR HANDLER · blower telemetry ──
   - platform: template
-    id: hvac_ahu_rpm_raw
+    id: ahu_blower_rpm
     name: "AHU Blower RPM"
     unit_of_measurement: "rpm"
     icon: mdi:fan
     state_class: measurement
     accuracy_decimals: 0
   - platform: template
-    id: hvac_ahu_value_2_raw
-    name: "ahu value2 raw"
+    id: ahu_operating_target_raw
+    name: "AHU Operating Target Raw"
     accuracy_decimals: 0
     entity_category: diagnostic
   - platform: template
-    id: hvac_ahu_flags_raw
-    name: "ahu flags raw"
+    id: ahu_blower_status_raw
+    name: "AHU Blower Status Raw"
     accuracy_decimals: 0
     entity_category: diagnostic
   - platform: template
-    id: hvac_ahu_bit3_raw
-    name: "ahu bit3 raw"
+    id: ahu_blower_status_bit3_raw
+    name: "AHU Blower Status Bit3 Raw"
     accuracy_decimals: 0
     entity_category: diagnostic
 
   # ── HEAT PUMP · stage and status ──
   - platform: template
-    id: heat_pump_state
-    name: Heat Pump Requested Stage
+    id: heat_pump_stage_requested
+    name: "Heat Pump Stage Requested"
     accuracy_decimals: 0
     entity_category: diagnostic
   - platform: template
-    id: hvac_hp_command_raw
+    id: heat_pump_command_raw
     name: "Heat Pump Command Raw"
     accuracy_decimals: 0
     entity_category: diagnostic
   - platform: template
-    id: hvac_hp_equipment_active_raw
-    name: "heat pump active raw"
+    id: heat_pump_active_reported
+    name: "Heat Pump Active Reported"
     accuracy_decimals: 0
     entity_category: diagnostic
 
-  # ── ESP32 · framer and internal clock ──
+  # ── ATOM · framer and internal clock ──
   - platform: template
     id: hvac_hour
     name: Hour
@@ -291,7 +296,7 @@ sensor:
     accuracy_decimals: 0
     entity_category: diagnostic
 
-  # ── ESP32 · debug and uptime ──
+  # ── ATOM · debug and uptime ──
   - platform: debug
     free:
       name: Atom Free Heap
@@ -306,87 +311,86 @@ sensor:
 binary_sensor:
   # ── THERMOSTAT · demand bits and holds ──
   - platform: template
-    id: hvac_3b02_bit5
-    name: "3B02 Bit 5"
+    id: tstat_demand_bit5
+    name: "Tstat Demand Bit5"
     entity_category: diagnostic
     lambda: |-
-      if (isnan(id(hvac_thermostat_mode).state)) return {};
-      return (static_cast<int>(id(hvac_thermostat_mode).state) & 0x20) != 0;
+      if (isnan(id(tstat_demand_raw).state)) return {};
+      return (static_cast<int>(id(tstat_demand_raw).state) & 0x20) != 0;
   - platform: template
-    id: hvac_3b02_bit6
-    name: "3B02 Bit 6"
+    id: tstat_demand_bit6
+    name: "Tstat Demand Bit6"
     entity_category: diagnostic
     lambda: |-
-      if (isnan(id(hvac_thermostat_mode).state)) return {};
-      return (static_cast<int>(id(hvac_thermostat_mode).state) & 0x40) != 0;
+      if (isnan(id(tstat_demand_raw).state)) return {};
+      return (static_cast<int>(id(tstat_demand_raw).state) & 0x40) != 0;
   - platform: template
-    id: hvac_zone1_permanent_hold
-    name: "Permanent Hold"
+    id: tstat_hold_active
+    name: "Tstat Hold Active"
     icon: mdi:hand-back-right
     lambda: |-
-      if (isnan(id(hvac_zones_holding_raw).state)) return {};
-      return (static_cast<uint8_t>(id(hvac_zones_holding_raw).state) & 0x01) != 0;
+      if (isnan(id(tstat_hold_mask_raw).state)) return {};
+      return (static_cast<uint8_t>(id(tstat_hold_mask_raw).state) & 0x01) != 0;
     entity_category: diagnostic
   - platform: template
-    id: hvac_zone1_timed_override
-    name: "Timed Override"
+    id: tstat_hold_timed
+    name: "Tstat Hold Timed"
     icon: mdi:timer
     lambda: |-
-      if (isnan(id(hvac_timed_holds_raw).state)) return {};
-      return (static_cast<uint8_t>(id(hvac_timed_holds_raw).state) & 0x01) != 0;
+      if (isnan(id(tstat_timed_hold_mask_raw).state)) return {};
+      return (static_cast<uint8_t>(id(tstat_timed_hold_mask_raw).state) & 0x01) != 0;
     entity_category: diagnostic
 
   # ── FURNACE · 0404 diagnostic bits ──
   - platform: template
-    id: hvac_0404_bit0
-    name: "0404 Bit 0"
+    id: furnace_status_bit0
+    name: "Furnace Status Bit0"
     entity_category: diagnostic
     lambda: |-
-      if (isnan(id(hvac_furnace_flags_raw).state)) return {};
-      return (static_cast<int>(id(hvac_furnace_flags_raw).state) & 0x01) != 0;
+      if (isnan(id(furnace_status_raw).state)) return {};
+      return (static_cast<int>(id(furnace_status_raw).state) & 0x01) != 0;
   - platform: template
-    id: hvac_0404_bit1
-    name: "0404 Bit 1"
+    id: furnace_status_bit1
+    name: "Furnace Status Bit1"
     entity_category: diagnostic
     lambda: |-
-      if (isnan(id(hvac_furnace_flags_raw).state)) return {};
-      return (static_cast<int>(id(hvac_furnace_flags_raw).state) & 0x02) != 0;
+      if (isnan(id(furnace_status_raw).state)) return {};
+      return (static_cast<int>(id(furnace_status_raw).state) & 0x02) != 0;
   - platform: template
-    id: hvac_0404_bit2
-    name: "0404 Bit 2"
+    id: furnace_status_bit2
+    name: "Furnace Status Bit2"
     entity_category: diagnostic
     lambda: |-
-      if (isnan(id(hvac_furnace_flags_raw).state)) return {};
-      return (static_cast<int>(id(hvac_furnace_flags_raw).state) & 0x04) != 0;
+      if (isnan(id(furnace_status_raw).state)) return {};
+      return (static_cast<int>(id(furnace_status_raw).state) & 0x04) != 0;
   - platform: template
-    id: hvac_0404_bit3
-    name: "0404 Bit 3"
+    id: furnace_status_bit3
+    name: "Furnace Status Bit3"
     entity_category: diagnostic
     lambda: |-
-      if (isnan(id(hvac_furnace_flags_raw).state)) return {};
-      return (static_cast<int>(id(hvac_furnace_flags_raw).state) & 0x08) != 0;
+      if (isnan(id(furnace_status_raw).state)) return {};
+      return (static_cast<int>(id(furnace_status_raw).state) & 0x08) != 0;
   - platform: template
-    id: hvac_0404_bit4
-    name: "0404 Bit 4"
+    id: furnace_status_bit4
+    name: "Furnace Status Bit4"
     entity_category: diagnostic
     lambda: |-
-      if (isnan(id(hvac_furnace_flags_raw).state)) return {};
-      return (static_cast<int>(id(hvac_furnace_flags_raw).state) & 0x10) != 0;
+      if (isnan(id(furnace_status_raw).state)) return {};
+      return (static_cast<int>(id(furnace_status_raw).state) & 0x10) != 0;
 
-  # Thermostat register 3B02, payload offset 25
 
 text_sensor:
   # ── THERMOSTAT · decoded diagnostics ──
   - platform: template
-    id: hvac_selected_mode
+    id: tstat_demand_decoded
     entity_category: diagnostic
-    name: "Thermostat Demand Raw Decoded"
+    name: "Tstat Demand Decoded"
     icon: mdi:hvac
     lambda: |-
-      if (isnan(id(hvac_thermostat_mode).state))
+      if (isnan(id(tstat_demand_raw).state))
         return {"UNKNOWN"};
 
-      switch (static_cast<int>(id(hvac_thermostat_mode).state)) {
+      switch (static_cast<int>(id(tstat_demand_raw).state)) {
         case 0:  return {"NO DEMAND"};
         case 32: return {"DEMAND 0x20"};
         case 64: return {"DEMAND 0x40"};
@@ -394,13 +398,13 @@ text_sensor:
         default: return {"UNMAPPED"};
       }
   - platform: template
-    id: hvac_zone1_fan_mode
+    id: tstat_fan_mode
     entity_category: diagnostic
-    name: "Fan Mode"
+    name: "Tstat Fan Mode"
     icon: mdi:fan
     lambda: |-
-      if (isnan(id(hvac_fan_mode_raw).state)) return {"UNKNOWN"};
-      switch (static_cast<int>(id(hvac_fan_mode_raw).state)) {
+      if (isnan(id(tstat_fan_mode_raw).state)) return {"UNKNOWN"};
+      switch (static_cast<int>(id(tstat_fan_mode_raw).state)) {
         case 0: return {"AUTO"};
         case 1: return {"LOW"};
         case 2: return {"MED"};
@@ -408,7 +412,7 @@ text_sensor:
         default: return {"UNKNOWN"};
       }
 
-  # ── ESP32 · clock and transaction diagnostics ──
+  # ── ATOM · clock and transaction diagnostics ──
   - platform: template
     id: hvac_datetime
     name: Date and Time
@@ -420,7 +424,7 @@ text_sensor:
     
   # DEBUG
 
-  # ── ESP32 · debug ──
+  # ── ATOM · debug ──
   - platform: debug
     reset_reason:
       name: Atom Reset Reason
@@ -434,79 +438,84 @@ bryant_parser:
   messages:
     # ── THERMOSTAT 0x20 · status, configuration, and broadcasts ──
     # 0202 · broadcasts current time for other system devices [inferred; not Bryant documentation]
-    - name: thermostat_time
+    - name: tstat_0202_command
       log: false
       match: {dst: 0xF1, src: 0x20, function: 0x0C, register: 0x0202}
       payload_min: 6
     # 0203 · broadcasts current date for other system devices [inferred; not Bryant documentation]
-    - name: thermostat_date
+    - name: tstat_0203_command
       log: false
       match: {dst: 0xF1, src: 0x20, function: 0x0C, register: 0x0203}
       payload_min: 6
     # 0420 · distributes outdoor temperature and indoor humidity readings [inferred; not Bryant documentation]
-    - name: thermostat_broadcast_0420
+    - name: tstat_0420_broadcast
       log: true
       match: {dst: 0xF1, src: 0x20, function: 0x0C, register: 0x0420}
       payload_min: 22
     # 3B02 · returns thermostat zone status, temperature, and demand-related flags [inferred; not Bryant documentation]
-    - name: thermostat_status
+    - name: tstat_3b02_response
       log: true
       match: {dst: 0x92, src: 0x20, function: 0x06, register: 0x3B02}
       payload_min: 26
     # 3B03 · returns zone setpoints, fan settings, and hold/override data [inferred; not Bryant documentation]
-    - name: thermostat_heat_setpoint
+    - name: tstat_3b03_response
       log: true
       match: {dst: 0x92, src: 0x20, function: 0x06, register: 0x3B03}
       payload_min: 43
 
     # ── FURNACE / AHU 0x40 · stage and blower telemetry ──
     # 0306 · reports blower speed, stage-correlated target, and AHU flags [inferred; not Bryant documentation]
-    - name: furnace_status_0306
+    # 0305 · Thermostat requests furnace heat level (0=off, 1=low, 2=medium; 3 unverified).
+    - name: furnace_0305_command
+      log: true
+      match: {dst: 0x40, src: 0x20, function: 0x0C, register: 0x0305}
+      payload_min: 4
+    - name: furnace_0306_response
       log: true
       match: {dst: 0x20, src: 0x40, function: 0x06, register: 0x0306}
       payload_min: 13
     # 0316 · reports furnace stage and associated operating values [inferred; not Bryant documentation]
-    - name: furnace_status_0316
+    - name: furnace_0316_response
       log: true
       match: {dst: 0x20, src: 0x40, function: 0x06, register: 0x0316}
       payload_min: 17
     # 0404 · reports furnace operating flags and additional blower/thermal telemetry [inferred; not Bryant documentation]
-    - name: furnace_status_0404
+    - name: furnace_0404_response
       match: {dst: 0x20, src: 0x40, function: 0x06, register: 0x0404}
       payload_min: 21
 
     # ── HEAT PUMP 0x50 · staging and outdoor-unit status ──
     # 0502 · reports outdoor-unit active indication and status bytes [inferred; not Bryant documentation]
-    - name: heat_pump_status_0502
+    - name: heat_pump_0502_response
       match: {dst: 0x20, src: 0x50, function: 0x06, register: 0x0502}
       payload_min: 8
     # 3E01 · reports outdoor-unit telemetry or configuration (meaning unverified) [inferred; not Bryant documentation]
-    - name: heat_pump_status_3e01
+    - name: heat_pump_3e01_response
       log: true
       match: {dst: 0x20, src: 0x50, function: 0x06, register: 0x3E01}
       payload_min: 16
     # 3E02 · commands the heat-pump operating stage [inferred; not Bryant documentation]
-    - name: heat_pump_command_3e02
+    - name: heat_pump_3e02_command
       log: false
       match: {dst: 0x50, src: 0x20, function: 0x0C, register: 0x3E02}
       payload_min: 4
 
   fields:
     # ── THERMOSTAT · 0202 time ──
-    - {name: hour, message: thermostat_time, sensor_id: hvac_hour, offset: 3}
-    - {name: minute, message: thermostat_time, sensor_id: hvac_minute, offset: 4}
-    - {name: second, message: thermostat_time, sensor_id: hvac_second, offset: 5}
+    - {name: hour, message: tstat_0202_command, sensor_id: hvac_hour, offset: 3}
+    - {name: minute, message: tstat_0202_command, sensor_id: hvac_minute, offset: 4}
+    - {name: second, message: tstat_0202_command, sensor_id: hvac_second, offset: 5}
 
     # ── THERMOSTAT · 0203 date ──
-    - {name: day, message: thermostat_date, sensor_id: hvac_day, offset: 3}
-    - {name: month, message: thermostat_date, sensor_id: hvac_month, offset: 4}
-    - {name: year, message: thermostat_date, sensor_id: hvac_year, offset: 5}
+    - {name: day, message: tstat_0203_command, sensor_id: hvac_day, offset: 3}
+    - {name: month, message: tstat_0203_command, sensor_id: hvac_month, offset: 4}
+    - {name: year, message: tstat_0203_command, sensor_id: hvac_year, offset: 5}
 
     # ── THERMOSTAT · 0420 environmental ──
-    - {name: indoor_humidity, message: thermostat_broadcast_0420, sensor_id: indoor_humidity, offset: 13}
+    - {name: indoor_humidity, message: tstat_0420_broadcast, sensor_id: tstat_indoor_humidity, offset: 13}
     - name: outdoor_temp
-      message: thermostat_broadcast_0420
-      sensor_id: outdoor_temp
+      message: tstat_0420_broadcast
+      sensor_id: tstat_outdoor_temp
       offset: 9
       width: 16
       endian: big
@@ -514,58 +523,63 @@ bryant_parser:
       multiplier: 0.0625
 
     # ── THERMOSTAT · 3B02 status ──
-    - {name: indoor_temp, message: thermostat_status, sensor_id: m212063b02f14, offset: 6}
-    - {name: selected_mode, message: thermostat_status, sensor_id: hvac_thermostat_mode, offset: 25}
+    - {name: indoor_temp, message: tstat_3b02_response, sensor_id: tstat_indoor_temp, offset: 6}
+    - {name: tstat_demand_raw, message: tstat_3b02_response, sensor_id: tstat_demand_raw, offset: 25}
 
     # ── THERMOSTAT · 3B03 setpoints, fan and holds ──
-    - {name: heat_setpoint, message: thermostat_heat_setpoint, sensor_id: m212063b03f23, offset: 15}
-    - {name: cool_setpoint, message: thermostat_heat_setpoint, sensor_id: hvac_cool_setpoint, offset: 23}
-    - {name: fan_mode, message: thermostat_heat_setpoint, sensor_id: hvac_fan_mode_raw, offset: 6}
-    - {name: fan_speed, message: thermostat_heat_setpoint, sensor_id: hvac_fan_speed_raw, offset: 39}
-    - {name: zones_holding, message: thermostat_heat_setpoint, sensor_id: hvac_zones_holding_raw, offset: 14}
-    - {name: timed_holds, message: thermostat_heat_setpoint, sensor_id: hvac_timed_holds_raw, offset: 40}
-    - {name: override_minutes, message: thermostat_heat_setpoint, sensor_id: hvac_hold_duration_raw, offset: 41, width: 16, endian: big}
+    - {name: heat_setpoint, message: tstat_3b03_response, sensor_id: tstat_heat_setpoint, offset: 15}
+    - {name: cool_setpoint, message: tstat_3b03_response, sensor_id: tstat_cool_setpoint, offset: 23}
+    - {name: fan_mode, message: tstat_3b03_response, sensor_id: tstat_fan_mode_raw, offset: 6}
+    - {name: fan_speed, message: tstat_3b03_response, sensor_id: tstat_fan_speed_raw, offset: 39}
+    - {name: zones_holding, message: tstat_3b03_response, sensor_id: tstat_hold_mask_raw, offset: 14}
+    - {name: timed_holds, message: tstat_3b03_response, sensor_id: tstat_timed_hold_mask_raw, offset: 40}
+    - {name: override_minutes, message: tstat_3b03_response, sensor_id: tstat_hold_minutes, offset: 41, width: 16, endian: big}
 
     # ── FURNACE / AHU · 0306 blower and operating values ──
+    - name: furnace_stage_requested
+      message: furnace_0305_command
+      sensor_id: furnace_stage_requested
+      offset: 3
+
     - name: ahu_rpm
-      message: furnace_status_0306
-      sensor_id: hvac_ahu_rpm_raw
+      message: furnace_0306_response
+      sensor_id: ahu_blower_rpm
       offset: 4
       width: 16
       endian: big
-    - name: furnace_0306_value_2
-      message: furnace_status_0306
-      sensor_id: hvac_ahu_value_2_raw
+    - name: ahu_operating_target_raw
+      message: furnace_0306_response
+      sensor_id: ahu_operating_target_raw
       offset: 6
       width: 16
       endian: big
     - name: furnace_0306_flags
-      message: furnace_status_0306
-      sensor_id: hvac_ahu_flags_raw
+      message: furnace_0306_response
+      sensor_id: ahu_blower_status_raw
       offset: 12
     - name: furnace_0306_bit3
-      message: furnace_status_0306
-      sensor_id: hvac_ahu_bit3_raw
+      message: furnace_0306_response
+      sensor_id: ahu_blower_status_bit3_raw
       offset: 12
       mask: 0x08
       shift: 3
 
     # ── FURNACE · 0316 reported stage ──
-    - name: furnace_sequence
-      message: furnace_status_0316
-      sensor_id: hvac_furnace_sequence_raw
+    - name: furnace_stage_reported
+      message: furnace_0316_response
+      sensor_id: furnace_stage_reported
       offset: 3
 
     # ── FURNACE · 0404 status flags ──
     - name: furnace_flags
-      message: furnace_status_0404
-      sensor_id: hvac_furnace_flags_raw
+      message: furnace_0404_response
+      sensor_id: furnace_status_raw
       offset: 6
 
     # ── HEAT PUMP · 0502 equipment status ──
     - name: hp_equipment_active
-      message: heat_pump_status_0502
-      sensor_id: hvac_hp_equipment_active_raw
+      message: heat_pump_0502_response
+      sensor_id: heat_pump_active_reported
       offset: 4
 
 # Read-only date/time is published by bryant_parser to text_sensor.hvac_datetime.
@@ -574,16 +588,16 @@ bryant_parser:
 
     # ── HEAT PUMP · 3E02 stage command ──
     - name: heat_pump_stage
-      message: heat_pump_command_3e02
-      sensor_id: heat_pump_state
+      message: heat_pump_3e02_command
+      sensor_id: heat_pump_stage_requested
       offset: 3
       bit_rules:
         - {mask: 0x04, value: 2}
         - {mask: 0x02, value: 1}
       default: 0
     - name: hp_command_raw
-      message: heat_pump_command_3e02
-      sensor_id: hvac_hp_command_raw
+      message: heat_pump_3e02_command
+      sensor_id: heat_pump_command_raw
       offset: 3
 
   # Read-only date/time is published to text_sensor.hvac_datetime.
@@ -646,7 +660,7 @@ number:
     update_interval: 5s
 
     lambda: |-
-      return id(m212063b03f23).state;
+      return id(tstat_heat_setpoint).state;
 
     set_action:
       - lambda: |-
@@ -656,14 +670,14 @@ number:
             return;
           }
 
-          if (isnan(id(hvac_thermostat_mode).state) ||
-            static_cast<int>(id(hvac_thermostat_mode).state) != 0) {
+          if (isnan(id(tstat_demand_raw).state) ||
+            static_cast<int>(id(tstat_demand_raw).state) != 0) {
             ESP_LOGW("atom_climate",
                      "AUTO override rejected: thermostat not in HEAT");
             return;
           }
 
-          if (id(hvac_zone1_permanent_hold).state) {
+          if (id(tstat_hold_active).state) {
             ESP_LOGW("atom_climate",
                      "AUTO override rejected: permanent HOLD active");
             return;
@@ -729,7 +743,7 @@ climate:
   - platform: template
     id: bryant_climate
     name: Bryant Climate
-    sensor: indoor_temp_c
+    sensor: tstat_indoor_temp_c
     supported_modes: ["OFF", AUTO, HEAT, COOL]
     supports_current_temperature: true
     supports_two_point_target_temperature: false
@@ -743,7 +757,7 @@ climate:
       mode: "OFF"
     on_control:
       - lambda: |-
-          const float raw = id(hvac_thermostat_mode).state;
+          const float raw = id(tstat_demand_raw).state;
           const int thermostat_mode = isnan(raw) ? -1 : static_cast<int>(raw);
           if (x.get_mode().has_value()) {
             const auto requested = x.get_mode().value();
@@ -780,8 +794,8 @@ climate:
             if (f >= 50 && f <= 86 && thermostat_mode == 0 &&
                 (id(atom_policy) == 1 || id(atom_policy) == 2) &&
                 !(id(atom_policy) == 1 &&
-                  (isnan(id(hvac_zones_holding_raw).state) ||
-                   (static_cast<uint8_t>(id(hvac_zones_holding_raw).state) & 1)))) {
+                  (isnan(id(tstat_hold_mask_raw).state) ||
+                   (static_cast<uint8_t>(id(tstat_hold_mask_raw).state) & 1)))) {
               // In AUTO, set_heat() while not on permanent HOLD produces the thermostat's
               // default temporary override (observed ~120 minutes). In HEAT it preserves HOLD.
               id(atom_target_f) = f;
@@ -799,12 +813,12 @@ interval:
   - interval: 250ms
     then:
       - lambda: |-
-          const float mode_raw = id(hvac_thermostat_mode).state;
+          const float mode_raw = id(tstat_demand_raw).state;
           const int tmode = isnan(mode_raw) ? -1 : static_cast<int>(mode_raw);
-          const bool have_hold = !isnan(id(hvac_zones_holding_raw).state);
-          const bool hold = have_hold && ((static_cast<uint8_t>(id(hvac_zones_holding_raw).state) & 1) != 0);
-          const bool timed = !isnan(id(hvac_timed_holds_raw).state) &&
-              ((static_cast<uint8_t>(id(hvac_timed_holds_raw).state) & 1) != 0);
+          const bool have_hold = !isnan(id(tstat_hold_mask_raw).state);
+          const bool hold = have_hold && ((static_cast<uint8_t>(id(tstat_hold_mask_raw).state) & 1) != 0);
+          const bool timed = !isnan(id(tstat_timed_hold_mask_raw).state) &&
+              ((static_cast<uint8_t>(id(tstat_timed_hold_mask_raw).state) & 1) != 0);
           const bool busy = id(hvac_set).is_busy();
           // Startup/observation: OFF if thermostat OFF; AUTO if HEAT or COOL.
           // Unknown mode never implies permission to write.
@@ -885,7 +899,7 @@ interval:
               default: return climate::CLIMATE_MODE_OFF;
             }
           target_temperature: !lambda |-
-            const float f = id(m212063b03f23).state;
+            const float f = id(tstat_heat_setpoint).state;
             return isnan(f) ? NAN : (f - 32.0f) * 5.0f / 9.0f;
 
 # Manual raw-hex diagnostic transmission (CRC and length verified by writer).
