@@ -190,17 +190,6 @@ sensor:
     unit_of_measurement: min
     icon: mdi:timer-outline
     accuracy_decimals: 0
-    free:
-      name: Atom Free Heap
-    block:
-      name: Atom Loop Time
-    name: Atom Uptime
-    type: seconds
-    
-  - platform: template
-    accuracy_decimals: 0
-    entity_category: diagnostic
-    
 
   # ── FURNACE · stage and status ──
   - platform: template
