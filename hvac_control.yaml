@@ -4,7 +4,7 @@ esphome:
   friendly_name: HVAC
   project: 
     name: 'chatgpt.bryant-hvac'
-    version: '3.50'
+    version: '3.51'
   platformio_options:
     board_build.flash_mode: dio
 
@@ -159,9 +159,20 @@ sensor:
     unit_of_measurement: "°F"
     device_class: temperature
     accuracy_decimals: 0
+
+  # THERMOSTAT -- mode, operational policy
   - platform: template
-    id: tstat_demand_raw
-    name: "Tstat Demand Raw"
+    id: control_policy
+    name: "Control Policy"
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(atom_policy);
+
+  - platform: template
+    id: tstat_mode_raw
+    name: "Tstat Mode Raw"
     accuracy_decimals: 0
     entity_category: diagnostic
   - platform: template
@@ -309,21 +320,30 @@ sensor:
     type: seconds
 
 binary_sensor:
+  # -- THERMOSTAT -- control bits
+  - platform: template
+    id: control_hold_owned
+    name: "Control Hold Owned"
+    entity_category: diagnostic
+    lambda: |-
+      return id(atom_owned_hold);
+    update_interval: 1s
+
   # ── THERMOSTAT · demand bits and holds ──
   - platform: template
     id: tstat_demand_bit5
     name: "Tstat Demand Bit5"
     entity_category: diagnostic
     lambda: |-
-      if (isnan(id(tstat_demand_raw).state)) return {};
-      return (static_cast<int>(id(tstat_demand_raw).state) & 0x20) != 0;
+      if (isnan(id(tstat_mode_raw).state)) return {};
+      return (static_cast<int>(id(tstat_mode_raw).state) & 0x20) != 0;
   - platform: template
     id: tstat_demand_bit6
     name: "Tstat Demand Bit6"
     entity_category: diagnostic
     lambda: |-
-      if (isnan(id(tstat_demand_raw).state)) return {};
-      return (static_cast<int>(id(tstat_demand_raw).state) & 0x40) != 0;
+      if (isnan(id(tstat_mode_raw).state)) return {};
+      return (static_cast<int>(id(tstat_mode_raw).state) & 0x40) != 0;
   - platform: template
     id: tstat_hold_active
     name: "Tstat Hold Active"
@@ -382,19 +402,19 @@ binary_sensor:
 text_sensor:
   # ── THERMOSTAT · decoded diagnostics ──
   - platform: template
-    id: tstat_demand_decoded
+    id: tstat_mode_decoded
     entity_category: diagnostic
-    name: "Tstat Demand Decoded"
+    name: "Tstat Mode Decoded"
     icon: mdi:hvac
     lambda: |-
-      if (isnan(id(tstat_demand_raw).state))
+      if (isnan(id(tstat_mode_raw).state))
         return {"UNKNOWN"};
 
-      switch (static_cast<int>(id(tstat_demand_raw).state)) {
-        case 0:  return {"NO DEMAND"};
-        case 32: return {"DEMAND 0x20"};
-        case 64: return {"DEMAND 0x40"};
-        case 96: return {"DEMAND 0x60"};
+      switch (static_cast<int>(id(tstat_mode_raw).state)) {
+        case 0:  return {"NO MODE"};
+        case 32: return {"MODE 0x20"};
+        case 64: return {"MODE 0x40"};
+        case 96: return {"MODE 0x60"};
         default: return {"UNMAPPED"};
       }
   - platform: template
@@ -524,7 +544,7 @@ bryant_parser:
 
     # ── THERMOSTAT · 3B02 status ──
     - {name: indoor_temp, message: tstat_3b02_response, sensor_id: tstat_indoor_temp, offset: 6}
-    - {name: tstat_demand_raw, message: tstat_3b02_response, sensor_id: tstat_demand_raw, offset: 25}
+    - {name: tstat_mode_raw, message: tstat_3b02_response, sensor_id: tstat_mode_raw, offset: 25}
 
     # ── THERMOSTAT · 3B03 setpoints, fan and holds ──
     - {name: heat_setpoint, message: tstat_3b03_response, sensor_id: tstat_heat_setpoint, offset: 15}
@@ -670,8 +690,8 @@ number:
             return;
           }
 
-          if (isnan(id(tstat_demand_raw).state) ||
-            static_cast<int>(id(tstat_demand_raw).state) != 0) {
+          if (isnan(id(tstat_mode_raw).state) ||
+            static_cast<int>(id(tstat_mode_raw).state) != 0) {
             ESP_LOGW("atom_climate",
                      "AUTO override rejected: thermostat not in HEAT");
             return;
@@ -757,7 +777,7 @@ climate:
       mode: "OFF"
     on_control:
       - lambda: |-
-          const float raw = id(tstat_demand_raw).state;
+          const float raw = id(tstat_mode_raw).state;
           const int thermostat_mode = isnan(raw) ? -1 : static_cast<int>(raw);
           if (x.get_mode().has_value()) {
             const auto requested = x.get_mode().value();
@@ -813,7 +833,7 @@ interval:
   - interval: 250ms
     then:
       - lambda: |-
-          const float mode_raw = id(tstat_demand_raw).state;
+          const float mode_raw = id(tstat_mode_raw).state;
           const int tmode = isnan(mode_raw) ? -1 : static_cast<int>(mode_raw);
           const bool have_hold = !isnan(id(tstat_hold_mask_raw).state);
           const bool hold = have_hold && ((static_cast<uint8_t>(id(tstat_hold_mask_raw).state) & 1) != 0);
