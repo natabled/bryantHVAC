@@ -4,7 +4,7 @@ esphome:
   friendly_name: HVAC
   project: 
     name: 'chatgpt.bryant-hvac'
-    version: '3.51'
+    version: '3.52'
   platformio_options:
     board_build.flash_mode: dio
 
@@ -176,6 +176,12 @@ sensor:
     accuracy_decimals: 0
     entity_category: diagnostic
   - platform: template
+    id: tstat_mode_raw_polled
+    name: "Tstat Mode Raw Polled"
+    accuracy_decimals: 0
+    entity_category: diagnostic  
+
+  - platform: template
     id: tstat_fan_mode_raw
     name: "Tstat Fan Mode Raw"
     accuracy_decimals: 0
@@ -327,7 +333,7 @@ binary_sensor:
     entity_category: diagnostic
     lambda: |-
       return id(atom_owned_hold);
-    update_interval: 1s
+  #  update_interval: 1s
 
   # ── THERMOSTAT · demand bits and holds ──
   - platform: template
@@ -533,6 +539,7 @@ bryant_parser:
 
     # ── THERMOSTAT · 0420 environmental ──
     - {name: indoor_humidity, message: tstat_0420_broadcast, sensor_id: tstat_indoor_humidity, offset: 13}
+    - {name: tstat_mode_raw, message: tstat_0420_broadcast, sensor_id: tstat_mode_raw, offset: 12}
     - name: outdoor_temp
       message: tstat_0420_broadcast
       sensor_id: tstat_outdoor_temp
@@ -544,7 +551,7 @@ bryant_parser:
 
     # ── THERMOSTAT · 3B02 status ──
     - {name: indoor_temp, message: tstat_3b02_response, sensor_id: tstat_indoor_temp, offset: 6}
-    - {name: tstat_mode_raw, message: tstat_3b02_response, sensor_id: tstat_mode_raw, offset: 25}
+    - {name: tstat_mode_polled, message: tstat_3b02_response, sensor_id: tstat_mode_raw_polled, offset: 25}
 
     # ── THERMOSTAT · 3B03 setpoints, fan and holds ──
     - {name: heat_setpoint, message: tstat_3b03_response, sensor_id: tstat_heat_setpoint, offset: 15}
