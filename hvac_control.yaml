@@ -4,7 +4,7 @@ esphome:
   friendly_name: HVAC
   project: 
     name: 'chatgpt.bryant-hvac'
-    version: '3.52'
+    version: '3.54
   platformio_options:
     board_build.flash_mode: dio
 
@@ -691,9 +691,9 @@ number:
 
     set_action:
       - lambda: |-
-          if (id(bryant_climate).mode != climate::CLIMATE_MODE_AUTO) {
-            ESP_LOGW("atom_climate",
-                     "AUTO setpoint ignored: climate is not in AUTO");
+          // Legacy Auto Setpoint control: valid only in Bryant-owned HEAT.
+          if (id(atom_policy) != 1) {
+            ESP_LOGW("atom_climate", "Auto Setpoint rejected: Atom is not in Bryant-control policy");
             return;
           }
 
@@ -718,12 +718,11 @@ number:
           id(atom_target_changed_at) = millis();
           ESP_LOGI("atom_climate", "AUTO override queued: %dF", target);
 
-# Atom climate policy is separate from the thermostat's selected HVAC mode.
-# OFF = thermostat reports mode 0x05 (not an Atom command).
-# AUTO = thermostat in HEAT/COOL; Atom observes and can request a temporary heat override.
-# HEAT = Atom owns a permanent HOLD while thermostat is selected HEAT.
-# COOL = reserved: no verified cool-setpoint writer yet; requests fall back to AUTO.
-# Never restore Atom ownership on reboot or adopt a manual HOLD.
+# Pass A: Bryant mode is authoritative for climate.mode (0420: 0 HEAT, 1 COOL, 5 OFF).
+# atom_policy is LEGACY ownership policy only: 0 inactive/off, 1 Bryant,
+# 2 supervisor-owned HOLD. It is not published as the climate HVAC mode.
+# No mode-write or new supervisor switch is introduced in Pass A.
+# The existing heat setpoint transaction and HOLD reconciliation are preserved.
 globals:
   - id: atom_policy
     type: int
@@ -771,7 +770,7 @@ climate:
     id: bryant_climate
     name: Bryant Climate
     sensor: tstat_indoor_temp_c
-    supported_modes: ["OFF", AUTO, HEAT, COOL]
+    supported_modes: ["OFF", HEAT, COOL]
     supports_current_temperature: true
     supports_two_point_target_temperature: false
     optimistic: false
@@ -786,35 +785,10 @@ climate:
       - lambda: |-
           const float raw = id(tstat_mode_raw).state;
           const int thermostat_mode = isnan(raw) ? -1 : static_cast<int>(raw);
+          // Physical mode changes are not implemented on the Bryant bus.
+          // Do NOT use climate mode buttons to request or release HOLD.
           if (x.get_mode().has_value()) {
-            const auto requested = x.get_mode().value();
-            if (requested == climate::CLIMATE_MODE_HEAT) {
-              if (thermostat_mode != 0) {
-                ESP_LOGW("atom_climate", "HEAT requires thermostat selected HEAT; no thermostat mode-write implemented");
-              } else if (id(atom_policy) != 2) {
-                id(atom_policy) = 2;
-                id(atom_hold_pending) = false;
-                id(atom_target_pending) = false;
-                // A pre-existing manual HOLD remains manual; only our transaction can establish ownership.
-                ESP_LOGI("atom_climate", "HEAT selected: request Atom-owned HOLD");
-              }
-            } else if (requested == climate::CLIMATE_MODE_AUTO) {
-              if (thermostat_mode == 0 || thermostat_mode == 1) {
-                if (id(atom_policy) == 2 && id(atom_owned_hold)) id(atom_release_pending) = true;
-                id(atom_policy) = 1;
-                id(atom_hold_pending) = false;
-                id(atom_target_pending) = false;
-                ESP_LOGI("atom_climate", "AUTO selected: observing thermostat");
-              } else {
-                ESP_LOGW("atom_climate", "AUTO requires thermostat HEAT or COOL");
-              }
-            } else if (requested == climate::CLIMATE_MODE_OFF) {
-              // Mode 0x05 is a physical thermostat setting, NOT an Atom-control disable.
-              // No verified 3B02 mode-write exists. Never claim to turn the thermostat off.
-              ESP_LOGW("atom_climate", "OFF requires thermostat mode 0x05; mode writing not implemented");
-            } else if (requested == climate::CLIMATE_MODE_COOL) {
-              ESP_LOGW("atom_climate", "COOL reserved: cool setpoint write not implemented");
-            }
+            ESP_LOGW("atom_climate", "Mode change rejected: Bryant mode-write unverified; change mode at thermostat");
           }
           if (x.get_target_temperature().has_value()) {
             const int f = static_cast<int>(lroundf(x.get_target_temperature().value() * 9.0f / 5.0f + 32.0f));
@@ -823,12 +797,12 @@ climate:
                 !(id(atom_policy) == 1 &&
                   (isnan(id(tstat_hold_mask_raw).state) ||
                    (static_cast<uint8_t>(id(tstat_hold_mask_raw).state) & 1)))) {
-              // In AUTO, set_heat() while not on permanent HOLD produces the thermostat's
-              // default temporary override (observed ~120 minutes). In HEAT it preserves HOLD.
+              // Bryant owner: temporary override (~120 min). Supervisor owner:
+              // setpoint changes preserve the already-confirmed Atom-owned HOLD.
               id(atom_target_f) = f;
               id(atom_target_pending) = true;
               id(atom_target_changed_at) = millis();
-              ESP_LOGI("atom_climate", "Queued %s heat target %dF", id(atom_policy) == 1 ? "AUTO override" : "HOLD", f);
+              ESP_LOGI("atom_climate", "Queued %s heat target %dF", id(atom_policy) == 1 ? "Bryant temporary override" : "supervisor HOLD", f);
             } else {
               ESP_LOGW("atom_climate", "Setpoint rejected: only HEAT-selected thermostat supported by writer");
             }
@@ -920,13 +894,37 @@ interval:
       - climate.template.publish:
           id: bryant_climate
           mode: !lambda |-
-            switch (id(atom_policy)) {
-              case 2: return climate::CLIMATE_MODE_HEAT;
-              case 1: return climate::CLIMATE_MODE_AUTO;
-              default: return climate::CLIMATE_MODE_OFF;
+            // Bryant-selected physical mode from unpolled 0420, never atom_policy.
+            const float raw = id(tstat_mode_raw).state;
+            if (isnan(raw)) return id(bryant_climate).mode;
+            switch (static_cast<int>(raw)) {
+              case 0: return climate::CLIMATE_MODE_HEAT;
+              case 1: return climate::CLIMATE_MODE_COOL;
+              case 5: return climate::CLIMATE_MODE_OFF;
+              default:
+                ESP_LOGW("atom_climate", "Unknown Bryant mode: %.0f", raw);
+                return id(bryant_climate).mode;
             }
+          action: !lambda |-
+            const float raw = id(tstat_mode_raw).state;
+            if (isnan(raw)) return climate::CLIMATE_ACTION_OFF;
+            const int mode = static_cast<int>(raw);
+            if (mode == 5) return climate::CLIMATE_ACTION_OFF;
+            if (mode != 0 && mode != 1) return climate::CLIMATE_ACTION_OFF;
+            const float furnace = id(furnace_stage_reported).state;
+            const float hp = id(heat_pump_active_reported).state;
+            if (mode == 0 && ((!isnan(furnace) && furnace > 0) ||
+                              (!isnan(hp) && hp > 0))) {
+              return climate::CLIMATE_ACTION_HEATING;
+            }
+            // Cooling action is not yet confirmed by a dedicated bus signal.
+            return climate::CLIMATE_ACTION_IDLE;
           target_temperature: !lambda |-
-            const float f = id(tstat_heat_setpoint).state;
+            const float raw = id(tstat_mode_raw).state;
+            if (isnan(raw)) return NAN;
+            const int mode = static_cast<int>(raw);
+            const float f = (mode == 1) ? id(tstat_cool_setpoint).state
+                                       : id(tstat_heat_setpoint).state;
             return isnan(f) ? NAN : (f - 32.0f) * 5.0f / 9.0f;
 
 # Manual raw-hex diagnostic transmission (CRC and length verified by writer).
